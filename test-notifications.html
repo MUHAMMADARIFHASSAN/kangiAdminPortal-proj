@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification System Tester</title>
+    <script src="https://download.playfab.com/PlayFabClientApi.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        
+        .status.info { background: #e3f2fd; color: #1976d2; }
+        .status.success { background: #e8f5e9; color: #388e3c; }
+        .status.error { background: #ffebee; color: #d32f2f; }
+        .status.warning { background: #fff3e0; color: #f57c00; }
+        
+        .login-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .login-section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .test-card {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+            transition: all 0.3s;
+        }
+        
+        .test-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .test-card h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .test-card p {
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 15px;
+        }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+        }
+        
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+        
+        .btn-success {
+            background: #4caf50;
+        }
+        
+        .btn-success:hover {
+            background: #388e3c;
+        }
+        
+        .results {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .results:empty::before {
+            content: 'Test results will appear here...';
+            color: #666;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        
+        .badge.passed { background: #4caf50; color: white; }
+        .badge.failed { background: #f44336; color: white; }
+        .badge.pending { background: #ff9800; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Notification System Tester</h1>
+        <p class="subtitle">Test your PlayFab CloudScript notification system</p>
+        
+        <div id="status" class="status info">
+            Status: Not logged in. Please login first.
+        </div>
+        
+        <div class="login-section" id="loginSection">
+            <h2>Step 1: Login to PlayFab</h2>
+            <div class="form-group">
+                <label>Title ID:</label>
+                <input type="text" id="titleId" value="182E5E" placeholder="Enter PlayFab Title ID">
+            </div>
+            <div class="form-group">
+                <label>Email:</label>
+                <input type="email" id="email" placeholder="Enter your email">
+            </div>
+            <div class="form-group">
+                <label>Password:</label>
+                <input type="password" id="password" placeholder="Enter your password">
+            </div>
+            <button onclick="login()" id="loginBtn">Login to PlayFab</button>
+        </div>
+        
+        <div id="testsSection" style="display: none;">
+            <h2 style="margin-bottom: 15px;">Step 2: Run Tests</h2>
+            
+            <div class="test-grid">
+                <div class="test-card">
+                    <h3>Test 1: Send Test <span class="badge pending" id="badge1">Pending</span></h3>
+                    <p>Send a basic test notification</p>
+                    <button onclick="runTest('sendTest', 1)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 2: Check Storage <span class="badge pending" id="badge2">Pending</span></h3>
+                    <p>Verify storage in PlayFab</p>
+                    <button onclick="runTest('checkStorage', 2)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 3: Get All <span class="badge pending" id="badge3">Pending</span></h3>
+                    <p>Fetch all notifications</p>
+                    <button onclick="runTest('getAll', 3)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 4: Ban Notification <span class="badge pending" id="badge4">Pending</span></h3>
+                    <p>Test ban notification</p>
+                    <button onclick="runTest('testBan', 4)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 5: Unban Notification <span class="badge pending" id="badge5">Pending</span></h3>
+                    <p>Test unban notification</p>
+                    <button onclick="runTest('testUnban', 5)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 6: Audio Approve <span class="badge pending" id="badge6">Pending</span></h3>
+                    <p>Test song approved notification</p>
+                    <button onclick="runTest('testAudioApprove', 6)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 7: Audio Delete <span class="badge pending" id="badge7">Pending</span></h3>
+                    <p>Test song deleted notification</p>
+                    <button onclick="runTest('testAudioDelete', 7)">Run Test</button>
+                </div>
+                
+                <div class="test-card">
+                    <h3>Test 8: Multiple <span class="badge pending" id="badge8">Pending</span></h3>
+                    <p>Send 5 notifications</p>
+                    <button onclick="runTest('sendMultiple', 8)">Run Test</button>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                <button onclick="runAllTests()" class="btn-success">▶ Run All Tests</button>
+                <button onclick="clearResults()" class="btn-danger">🗑️ Clear Results</button>
+            </div>
+        </div>
+        
+        <h2 style="margin: 30px 0 15px 0;">Test Results:</h2>
+        <div id="results" class="results"></div>
+    </div>
+    
+    <script>
+        let playFabId = null;
+        
+        function login() {
+            const titleId = document.getElementById('titleId').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!titleId || !email || !password) {
+                updateStatus('Please fill all fields', 'error');
+                return;
+            }
+            
+            PlayFab.settings.titleId = titleId;
+            
+            updateStatus('Logging in...', 'info');
+            document.getElementById('loginBtn').disabled = true;
+            
+            PlayFab.ClientApi.LoginWithEmailAddress({
+                Email: email,
+                Password: password,
+                TitleId: titleId
+            }, onLoginSuccess, onLoginError);
+        }
+        
+        function onLoginSuccess(result) {
+            playFabId = result.data.PlayFabId;
+            updateStatus(`✓ Logged in successfully! PlayFabId: ${playFabId}`, 'success');
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('testsSection').style.display = 'block';
+            log(`✓ Login successful\nPlayFabId: ${playFabId}\nTitle: ${PlayFab.settings.titleId}`);
+        }
+        
+        function onLoginError(error) {
+            updateStatus(`✗ Login failed: ${error.errorMessage}`, 'error');
+            document.getElementById('loginBtn').disabled = false;
+            log(`✗ Login error: ${error.errorMessage}`);
+        }
+        
+        function runTest(testType, badgeNum) {
+            if (!playFabId) {
+                updateStatus('Please login first!', 'error');
+                return;
+            }
+            
+            const params = testType === 'sendMultiple' 
+                ? { testType: testType, count: 5 }
+                : { testType: testType };
+            
+            log(`\n=== Running Test: ${testType} ===`);
+            updateBadge(badgeNum, 'pending', 'Testing...');
+            
+            PlayFab.ClientApi.ExecuteCloudScript({
+                FunctionName: "testNotificationSystem",
+                FunctionParameter: params
+            }, (result) => onTestSuccess(result, testType, badgeNum), 
+               (error) => onTestError(error, testType, badgeNum));
+        }
+        
+        function onTestSuccess(result, testType, badgeNum) {
+            if (result.data.FunctionResult) {
+                const res = result.data.FunctionResult;
+                
+                if (res.success) {
+                    updateBadge(badgeNum, 'passed', '✓ Passed');
+                    log(`✓ Test "${testType}" PASSED`);
+                    log(`Response: ${JSON.stringify(res, null, 2)}`);
+                } else {
+                    updateBadge(badgeNum, 'failed', '✗ Failed');
+                    log(`✗ Test "${testType}" FAILED`);
+                    log(`Error: ${res.error || 'Unknown error'}`);
+                }
+            } else {
+                updateBadge(badgeNum, 'failed', '✗ No Result');
+                log(`✗ Test "${testType}" returned no result`);
+            }
+            
+            // Log CloudScript logs
+            if (result.data.Logs && result.data.Logs.length > 0) {
+                log('\nCloudScript Logs:');
+                result.data.Logs.forEach(logEntry => {
+                    log(`  ${logEntry.Level}: ${logEntry.Message}`);
+                });
+            }
+        }
+        
+        function onTestError(error, testType, badgeNum) {
+            updateBadge(badgeNum, 'failed', '✗ Error');
+            log(`✗ Test "${testType}" ERROR: ${error.errorMessage}`);
+            updateStatus(`Test failed: ${error.errorMessage}`, 'error');
+        }
+        
+        async function runAllTests() {
+            updateStatus('Running all tests...', 'info');
+            
+            const tests = ['sendTest', 'checkStorage', 'getAll', 'testBan', 
+                          'testUnban', 'testAudioApprove', 'testAudioDelete', 'sendMultiple'];
+            
+            for (let i = 0; i < tests.length; i++) {
+                runTest(tests[i], i + 1);
+                await sleep(1500); // Wait 1.5s between tests
+            }
+            
+            updateStatus('All tests completed!', 'success');
+        }
+        
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+        
+        function updateStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+        
+        function updateBadge(num, type, text) {
+            const badge = document.getElementById(`badge${num}`);
+            badge.className = `badge ${type}`;
+            badge.textContent = text;
+        }
+        
+        function log(message) {
+            const results = document.getElementById('results');
+            results.textContent += message + '\n';
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        function clearResults() {
+            document.getElementById('results').textContent = '';
+            for (let i = 1; i <= 8; i++) {
+                updateBadge(i, 'pending', 'Pending');
+            }
+            updateStatus('Results cleared', 'info');
+        }
+    </script>
+</body>
+</html>

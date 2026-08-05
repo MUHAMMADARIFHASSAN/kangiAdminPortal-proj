@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification System Tester - Dummy Notifications</title>
+    <script src="https://download.playfab.com/PlayFabClientApi.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .btn-info:hover {
+            background: #138496;
+        }
+
+        .quick-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .notification-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .notification-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .notification-item.ban {
+            border-left-color: #dc3545;
+        }
+
+        .notification-item.unban {
+            border-left-color: #28a745;
+        }
+
+        .notification-item.audio_approved {
+            border-left-color: #28a745;
+        }
+
+        .notification-item.audio_deleted {
+            border-left-color: #dc3545;
+        }
+
+        .notification-item.admin_granted {
+            border-left-color: #ffc107;
+        }
+
+        .notification-item.admin_revoked {
+            border-left-color: #6c757d;
+        }
+
+        .notification-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 5px;
+            font-size: 16px;
+        }
+
+        .notification-message {
+            color: #666;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .notification-meta {
+            font-size: 12px;
+            color: #999;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .notification-type {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .type-ban {
+            background: #dc3545;
+            color: white;
+        }
+
+        .type-unban {
+            background: #28a745;
+            color: white;
+        }
+
+        .type-audio_approved {
+            background: #28a745;
+            color: white;
+        }
+
+        .type-audio_deleted {
+            background: #dc3545;
+            color: white;
+        }
+
+        .type-admin_granted {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .type-admin_revoked {
+            background: #6c757d;
+            color: white;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔔 Notification System Tester</h1>
+            <p>Create dummy notifications and test the notification system</p>
+        </div>
+
+        <div class="content">
+            <!-- Login Section -->
+            <div class="section" id="loginSection">
+                <h2>🔐 Login to PlayFab</h2>
+                <div class="form-group">
+                    <label>Email:</label>
+                    <input type="email" id="loginEmail" placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Password:</label>
+                    <input type="text" id="loginPassword" placeholder="password">
+                </div>
+                <button class="btn btn-primary" onclick="login()">Login</button>
+                <div id="loginStatus"></div>
+            </div>
+
+            <!-- Create Dummy Notification Section -->
+            <div class="section hidden" id="createSection">
+                <h2>➕ Create Dummy Notification</h2>
+                
+                <div class="form-group">
+                    <label>Target PlayFab ID:</label>
+                    <input type="text" id="targetPlayFabId" placeholder="Leave empty to use your own ID">
+                    <small style="color: #666;">Leave empty to send to yourself</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Notification Type:</label>
+                    <select id="notificationType">
+                        <option value="ban">Ban</option>
+                        <option value="unban">Unban</option>
+                        <option value="audio_approved">Audio Approved</option>
+                        <option value="audio_deleted">Audio Deleted</option>
+                        <option value="admin_granted">Admin Granted</option>
+                        <option value="admin_revoked">Admin Revoked</option>
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="success">Success</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Title:</label>
+                    <input type="text" id="notificationTitle" placeholder="Notification Title">
+                </div>
+
+                <div class="form-group">
+                    <label>Message:</label>
+                    <textarea id="notificationMessage" placeholder="Notification message..."></textarea>
+                </div>
+
+                <button class="btn btn-primary" onclick="createDummyNotification()">Create Notification</button>
+
+                <div class="quick-buttons">
+                    <button class="btn btn-danger" onclick="quickNotification('ban')">Quick: Ban</button>
+                    <button class="btn btn-success" onclick="quickNotification('unban')">Quick: Unban</button>
+                    <button class="btn btn-success" onclick="quickNotification('audio_approved')">Quick: Song Approved</button>
+                    <button class="btn btn-danger" onclick="quickNotification('audio_deleted')">Quick: Song Deleted</button>
+                    <button class="btn btn-warning" onclick="quickNotification('admin_granted')">Quick: Admin Granted</button>
+                    <button class="btn btn-info" onclick="quickNotification('admin_revoked')">Quick: Admin Revoked</button>
+                </div>
+
+                <div id="createStatus"></div>
+            </div>
+
+            <!-- View Notifications Section -->
+            <div class="section hidden" id="viewSection">
+                <h2>📋 Your Notifications</h2>
+                <button class="btn btn-primary" onclick="loadNotifications()">Refresh Notifications</button>
+                <button class="btn btn-danger" onclick="clearAllNotifications()">Clear All</button>
+
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalCount">0</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="unreadCount">0</div>
+                        <div class="stat-label">Unread</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="banCount">0</div>
+                        <div class="stat-label">Bans</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="approvedCount">0</div>
+                        <div class="stat-label">Approved</div>
+                    </div>
+                </div>
+
+                <div class="notification-list" id="notificationList"></div>
+                <div id="viewStatus"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const TITLE_ID = "182E5E";
+        let currentPlayFabId = null;
+
+        PlayFab.settings.titleId = TITLE_ID;
+
+        function showStatus(elementId, message, type = 'info') {
+            const el = document.getElementById(elementId);
+            el.className = `status ${type}`;
+            el.innerHTML = message;
+            el.style.display = 'block';
+        }
+
+        function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                showStatus('loginStatus', 'Please enter email and password', 'error');
+                return;
+            }
+
+            showStatus('loginStatus', 'Logging in...', 'info');
+
+            PlayFab.ClientApi.LoginWithEmailAddress({
+                TitleId: TITLE_ID,
+                Email: email,
+                Password: password
+            }, function(result) {
+                currentPlayFabId = result.data.PlayFabId;
+                showStatus('loginStatus', `✓ Logged in successfully! PlayFab ID: ${currentPlayFabId}`, 'success');
+                
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('createSection').classList.remove('hidden');
+                document.getElementById('viewSection').classList.remove('hidden');
+                
+                loadNotifications();
+            }, function(error) {
+                showStatus('loginStatus', `✗ Login failed: ${error.errorMessage}`, 'error');
+            });
+        }
+
+        function createDummyNotification() {
+            const targetId = document.getElementById('targetPlayFabId').value || currentPlayFabId;
+            const type = document.getElementById('notificationType').value;
+            const title = document.getElementById('notificationTitle').value;
+            const message = document.getElementById('notificationMessage').value;
+
+            if (!title || !message) {
+                showStatus('createStatus', 'Please enter title and message', 'error');
+                return;
+            }
+
+            showStatus('createStatus', 'Creating notification...', 'info');
+
+            // Create notification directly via UpdateUserData
+            PlayFab.ClientApi.GetUserData({
+                PlayFabId: targetId,
+                Keys: ["Notifications"]
+            }, function(getUserResult) {
+                let notifications = [];
+                
+                if (getUserResult.data.Data && getUserResult.data.Data.Notifications) {
+                    try {
+                        notifications = JSON.parse(getUserResult.data.Data.Notifications.Value);
+                    } catch (e) {
+                        console.error("Parse error:", e);
+                    }
+                }
+
+                // Create new notification
+                const newNotif = {
+                    id: "notif_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+                    title: title,
+                    message: message,
+                    type: type,
+                    data: {
+                        testMode: true,
+                        createdBy: "TestPage",
+                        timestamp: new Date().toISOString()
+                    },
+                    read: false,
+                    createdAt: new Date().toISOString()
+                };
+
+                // Add to beginning
+                notifications.unshift(newNotif);
+
+                // Keep max 50
+                if (notifications.length > 50) {
+                    notifications = notifications.slice(0, 50);
+                }
+
+                // Save back
+                PlayFab.ClientApi.UpdateUserData({
+                    Data: {
+                        Notifications: JSON.stringify(notifications)
+                    }
+                }, function(updateResult) {
+                    showStatus('createStatus', '✓ Notification created successfully!', 'success');
+                    
+                    // Clear form
+                    document.getElementById('notificationTitle').value = '';
+                    document.getElementById('notificationMessage').value = '';
+                    
+                    // Reload notifications
+                    setTimeout(() => loadNotifications(), 500);
+                }, function(updateError) {
+                    showStatus('createStatus', `✗ Update Error: ${updateError.errorMessage}`, 'error');
+                });
+
+            }, function(error) {
+                showStatus('createStatus', `✗ Get Error: ${error.errorMessage}`, 'error');
+            });
+        }
+
+        function quickNotification(type) {
+            const templates = {
+                ban: {
+                    title: "Account Suspended",
+                    message: "Your account has been suspended due to violation of terms of service."
+                },
+                unban: {
+                    title: "Account Restored",
+                    message: "Your account suspension has been lifted. Welcome back!"
+                },
+                audio_approved: {
+                    title: "Song Approved!",
+                    message: "Your song 'Test Track' has been approved and is now live!"
+                },
+                audio_deleted: {
+                    title: "Song Removed",
+                    message: "Your song 'Test Track' has been removed from the platform."
+                },
+                admin_granted: {
+                    title: "Admin Access Granted",
+                    message: "You have been granted admin privileges on the platform."
+                },
+                admin_revoked: {
+                    title: "Admin Access Revoked",
+                    message: "Your admin privileges have been revoked."
+                }
+            };
+
+            const template = templates[type];
+            document.getElementById('notificationType').value = type;
+            document.getElementById('notificationTitle').value = template.title;
+            document.getElementById('notificationMessage').value = template.message;
+
+            createDummyNotification();
+        }
+
+        function loadNotifications() {
+            showStatus('viewStatus', 'Loading notifications...', 'info');
+
+            PlayFab.ClientApi.GetUserData({
+                Keys: ["Notifications"]
+            }, function(result) {
+                if (result.data.Data && result.data.Data.Notifications) {
+                    const notifications = JSON.parse(result.data.Data.Notifications.Value);
+                    displayNotifications(notifications);
+                    showStatus('viewStatus', `✓ Loaded ${notifications.length} notifications`, 'success');
+                } else {
+                    displayNotifications([]);
+                    showStatus('viewStatus', 'No notifications found', 'info');
+                }
+            }, function(error) {
+                showStatus('viewStatus', `✗ Error: ${error.errorMessage}`, 'error');
+            });
+        }
+
+        function displayNotifications(notifications) {
+            const listEl = document.getElementById('notificationList');
+            
+            if (notifications.length === 0) {
+                listEl.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No notifications yet</p>';
+                updateStats(notifications);
+                return;
+            }
+
+            listEl.innerHTML = notifications.map(notif => `
+                <div class="notification-item ${notif.type}">
+                    <div class="notification-title">${notif.title}</div>
+                    <div class="notification-message">${notif.message}</div>
+                    <div class="notification-meta">
+                        <span>
+                            <span class="notification-type type-${notif.type}">${notif.type}</span>
+                            ${!notif.read ? '<span style="color: #667eea; font-weight: 600; margin-left: 8px;">● NEW</span>' : ''}
+                        </span>
+                        <span>${new Date(notif.createdAt).toLocaleString()}</span>
+                    </div>
+                </div>
+            `).join('');
+
+            updateStats(notifications);
+        }
+
+        function updateStats(notifications) {
+            document.getElementById('totalCount').textContent = notifications.length;
+            document.getElementById('unreadCount').textContent = notifications.filter(n => !n.read).length;
+            document.getElementById('banCount').textContent = notifications.filter(n => n.type === 'ban').length;
+            document.getElementById('approvedCount').textContent = notifications.filter(n => n.type === 'audio_approved').length;
+        }
+
+        function clearAllNotifications() {
+            if (!confirm('Are you sure you want to clear all notifications?')) {
+                return;
+            }
+
+            showStatus('viewStatus', 'Clearing notifications...', 'info');
+
+            PlayFab.ClientApi.UpdateUserData({
+                Data: {
+                    Notifications: JSON.stringify([])
+                }
+            }, function(result) {
+                showStatus('viewStatus', '✓ All notifications cleared', 'success');
+                displayNotifications([]);
+            }, function(error) {
+                showStatus('viewStatus', `✗ Error: ${error.errorMessage}`, 'error');
+            });
+        }
+    </script>
+</body>
+</html>

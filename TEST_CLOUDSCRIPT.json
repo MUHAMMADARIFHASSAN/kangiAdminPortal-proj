@@ -1,0 +1,124 @@
+{
+  "testCases": [
+    {
+      "name": "Test 1: Send Test Notification",
+      "description": "Basic notification send test",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "sendTest"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 2: Check Storage",
+      "description": "Verify notifications are stored in PlayFab",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "checkStorage"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 3: Get All Notifications",
+      "description": "Fetch all stored notifications",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "getAll"
+      },
+      "expectedResult": {
+        "success": true,
+        "notifications": []
+      }
+    },
+    {
+      "name": "Test 4: Ban Notification",
+      "description": "Send account ban notification",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "testBan"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 5: Unban Notification",
+      "description": "Send account unban notification",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "testUnban"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 6: Audio Approve Notification",
+      "description": "Send song approved notification",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "testAudioApprove"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 7: Audio Delete Notification",
+      "description": "Send song deleted notification",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "testAudioDelete"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 8: Send Multiple Notifications",
+      "description": "Send 5 notifications at once",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "sendMultiple",
+        "count": 5
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 9: Get Notification via Workflow",
+      "description": "Test notificationWorkflow handler",
+      "functionName": "notificationWorkflow",
+      "functionParameter": {
+        "action": "getNotifications"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    },
+    {
+      "name": "Test 10: Clear All Notifications",
+      "description": "Clear all notifications for fresh start",
+      "functionName": "testNotificationSystem",
+      "functionParameter": {
+        "testType": "clearAll"
+      },
+      "expectedResult": {
+        "success": true
+      }
+    }
+  ],
+  "instructions": {
+    "step1": "Deploy cloudscript.js to PlayFab Dashboard",
+    "step2": "Go to Automation → Cloud Script → Revisions",
+    "step3": "Click on latest revision → Test",
+    "step4": "Copy FunctionName and FunctionParameter from each test case above",
+    "step5": "Paste into test form and click Run Function",
+    "step6": "Verify expectedResult matches actual result"
+  }
+}
