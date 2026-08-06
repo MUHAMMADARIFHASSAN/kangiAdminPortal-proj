@@ -496,6 +496,8 @@ handlers.nftQrWorkflow = function (args, context) {
 
     // ====================================================================================
     // B. PUBLISH NEW NFT BATCH
+    //    Image is a Cloudinary CDN URL (uploaded client-side before calling this).
+    //    PlayFab TitleInternalData has a 1MB limit per key — using URLs keeps payload tiny.
     // ====================================================================================
     if (action === "publishNft") {
         var newNftObj = args.nftData;

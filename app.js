@@ -249,6 +249,44 @@
         el.settingsRefreshBtn.textContent = 'Refresh Data';
       });
     }
+
+    /* ── Cloudinary config — load saved values on page init ── */
+    const cloudNameInput  = $('cloudinaryCloudName');
+    const presetInput     = $('cloudinaryUploadPreset');
+    const saveBtn         = $('saveCloudinaryBtn');
+    const cloudAlert      = $('cloudinaryAlert');
+
+    if (cloudNameInput && presetInput) {
+      // Pre-fill with saved config
+      const saved = KangiService.getCloudinaryConfig();
+      if (saved) {
+        cloudNameInput.value = saved.cloudName;
+        presetInput.value    = saved.uploadPreset;
+      }
+
+      saveBtn?.addEventListener('click', () => {
+        const cloudName    = cloudNameInput.value.trim();
+        const uploadPreset = presetInput.value.trim();
+
+        if (!cloudName || !uploadPreset) {
+          _alert(cloudAlert, 'error', 'Both Cloud Name and Upload Preset are required.');
+          return;
+        }
+
+        KangiService.saveCloudinaryConfig(cloudName, uploadPreset);
+        _alert(cloudAlert, 'success', '✓ Cloudinary settings saved.');
+        setTimeout(() => cloudAlert.classList.add('hidden'), 3000);
+      });
+
+      // Reset to built-in defaults
+      $('resetCloudinaryBtn')?.addEventListener('click', () => {
+        localStorage.removeItem('kangi_cloudinary_config');
+        cloudNameInput.value = '';
+        presetInput.value    = '';
+        _alert(cloudAlert, 'success', '✓ Reset to default credentials (djgvzbxvt / Community_Feed).');
+        setTimeout(() => cloudAlert.classList.add('hidden'), 3000);
+      });
+    }
   }
 
   /* ================================================================
@@ -596,16 +634,32 @@
       if (count < 1)  return _alert(el.createAlert, 'error', 'QR quantity must be at least 1.');
       if (count > 50) return _alert(el.createAlert, 'error', 'Maximum 50 QR codes per batch.');
 
+      // Check Cloudinary config — always has defaults so this should never block
+      const cloudConfig = KangiService.getCloudinaryConfig();
+      if (!cloudConfig) {
+        _alert(el.createAlert, 'error',
+          '⚠️ Cloudinary not configured. Go to Settings → NFT Image Storage.');
+        return;
+      }
+
       _setLoading(el.createBtn, true);
-      _alert(el.createAlert, 'info', 'Compressing image and building QR batch…');
 
       try {
-        /* 1. Resize + compress image for PlayFab storage limits */
-        const image = await KangiService.resizeImage(file, 240);
+        /* 1. Upload image to Cloudinary CDN */
+        _alert(el.createAlert, 'info', 'Uploading image to CDN…');
+        const uploadResult = await KangiService.uploadToCloudinary(file);
 
-        /* 2. Build NFT object with unique tokens — mirrors C# approach */
-        const nftId  = _uid('COL');
-        const base   = location.origin + location.pathname;
+        if (!uploadResult.success) {
+          _alert(el.createAlert, 'error', uploadResult.error || 'Image upload failed.');
+          return;
+        }
+
+        const imageUrl = uploadResult.url;
+
+        /* 2. Build NFT object — image is a URL, not base64 */
+        _alert(el.createAlert, 'info', 'Building QR batch…');
+        const nftId = _uid('COL');
+        const base  = location.origin + location.pathname;
 
         const codes = Array.from({ length: count }, (_, i) => {
           const token = _uid('QR');
@@ -622,25 +676,23 @@
           id:          nftId,
           name,
           description: el.nftDesc.value.trim(),
-          image,
+          image:       imageUrl,           // ← CDN URL, not base64
           createdAt:   new Date().toISOString(),
           codes
         };
 
-        /* 3. Save to PlayFab via CloudScript publishNft action */
+        /* 3. Save to PlayFab — payload is now tiny (no embedded image) */
         _alert(el.createAlert, 'info', 'Saving to database…');
         const res = await KangiService.publishNft(nftObj);
 
         if (res && res.success !== false) {
           _alert(el.createAlert, 'success',
-            `✓ ${count} unique QR code${count > 1 ? 's' : ''} created for "${name}" and saved.`);
+            `✓ ${count} QR code${count > 1 ? 's' : ''} created for "${name}" and saved.`);
 
-          /* Reset form */
           el.nftForm.reset();
-          if (el.filePreview) el.filePreview.classList.add('hidden');
+          if (el.filePreview)     el.filePreview.classList.add('hidden');
           if (el.filePreviewName) el.filePreviewName.textContent = 'No file chosen';
 
-          /* Reload data and switch to manage tab */
           await _loadAllData();
           setTimeout(() => _switchView('manage'), 900);
         } else {

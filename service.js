@@ -1,7 +1,7 @@
 /* ============================================================
    service.js — Data & Auth Service Layer
    Mirrors the C# LoginManager + AdminManager flow in JS.
-   Title ID: 1D5959 (hardcoded, never exposed in UI)
+   Title ID: 182E5E (hardcoded, never exposed in UI)
    ============================================================ */
 
 const KangiService = (function () {
@@ -388,6 +388,78 @@ const KangiService = (function () {
     return _callSupportScript('deleteMessage', { messageId });
   }
 
+  /* ============================================================
+     CLOUDINARY CDN — Upload images to cloud storage
+     Cloud Name:     djgvzbxvt
+     Upload Preset:  Community_Feed  (unsigned)
+     ============================================================ */
+
+  const CLOUDINARY_DEFAULTS = {
+    cloudName:    'djgvzbxvt',
+    uploadPreset: 'Community_Feed'
+  };
+
+  /* Get Cloudinary config — localStorage override, falls back to hardcoded defaults */
+  function getCloudinaryConfig() {
+    try {
+      const saved = localStorage.getItem('kangi_cloudinary_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.cloudName && parsed.uploadPreset) return parsed;
+      }
+    } catch (e) {}
+    // Always return defaults so the app works out of the box
+    return CLOUDINARY_DEFAULTS;
+  }
+
+  /* Save Cloudinary config to localStorage */
+  function saveCloudinaryConfig(cloudName, uploadPreset) {
+    try {
+      localStorage.setItem('kangi_cloudinary_config', JSON.stringify({ cloudName, uploadPreset }));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* Upload file to Cloudinary using unsigned upload
+     Returns { success: true, url: "https://..." } or { success: false, error: "..." } */
+  function uploadToCloudinary(file) {
+    return new Promise((resolve) => {
+      const config = getCloudinaryConfig();
+      if (!config) {
+        resolve({ success: false, error: 'Cloudinary not configured. Go to Settings → NFT Image Storage and enter your credentials.' });
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', config.uploadPreset);
+
+      const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`;
+
+      fetch(uploadUrl, { method: 'POST', body: formData })
+        .then(response => {
+          if (!response.ok) {
+            return response.text().then(text => {
+              throw new Error(`Upload failed: ${response.status} ${text.substring(0, 100)}`);
+            });
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.secure_url) {
+            resolve({ success: true, url: data.secure_url });
+          } else {
+            resolve({ success: false, error: 'No URL returned from Cloudinary.' });
+          }
+        })
+        .catch(err => {
+          resolve({ success: false, error: err.message || 'Upload failed.' });
+        });
+    });
+  }
+
   /* ── Public API ── */
   return {
     init,
@@ -413,7 +485,10 @@ const KangiService = (function () {
     getNotifications,
     getSupportMessages,
     replyToMessage,
-    deleteSupportMessage
+    deleteSupportMessage,
+    getCloudinaryConfig,
+    saveCloudinaryConfig,
+    uploadToCloudinary
   };
 
 })();
