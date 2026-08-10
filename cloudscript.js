@@ -55,6 +55,9 @@ handlers.videoAppWorkflow = function (args, context) {
         var newSongObj = args.songData;
         newSongObj.isPending = true;
 
+        // Always stamp the uploader's PlayFab ID server-side — never trust the client
+        newSongObj.uploaderId = currentPlayerId;
+
         var currentSongsJson = server.GetTitleInternalData({ Keys: [SONGS_DATABASE_KEY] });
         var songsList = [];
         var approvedList = [];
@@ -258,7 +261,7 @@ handlers.videoAppWorkflow = function (args, context) {
                 songs[j].isPending = false;
                 statusUpdated = true;
                 targetSongOwnerId = songs[j].uploaderId || songs[j].ownerId || songs[j].uploader || "";
-                targetSongTitle = songs[j].title || songs[j].name || "Your song";
+                targetSongTitle = songs[j].SongName || songs[j].title || songs[j].name || songs[j].songTitle || songs[j].SongTitle || "";
                 foundSong = songs[j];
                 log.info("Song found!");
                 log.info("Song Title: " + targetSongTitle);
@@ -290,8 +293,10 @@ handlers.videoAppWorkflow = function (args, context) {
                 log.info("Sending notification to: " + targetSongOwnerId);
                 var notifResult = sendNotification(
                     targetSongOwnerId,
-                    "Song Approved!",
-                    "Your song '" + targetSongTitle + "' has been approved and is now live!",
+                    "Song Approved! 🎵",
+                    targetSongTitle
+                        ? "Your song '" + targetSongTitle + "' has been approved and is now live!"
+                        : "Your song has been approved and is now live!",
                     "audio_approved",
                     { songId: targetSongId, songTitle: targetSongTitle }
                 );
@@ -346,7 +351,7 @@ handlers.videoAppWorkflow = function (args, context) {
             for (var ds = 0; ds < allSongsList.length; ds++) {
                 if (allSongsList[ds].SongId === songIdToDelete) {
                     deletedSongOwnerId = allSongsList[ds].uploaderId || allSongsList[ds].ownerId || allSongsList[ds].uploader || "";
-                    deletedSongTitle = allSongsList[ds].title || allSongsList[ds].name || "Your song";
+                    deletedSongTitle = allSongsList[ds].SongName || allSongsList[ds].title || allSongsList[ds].name || allSongsList[ds].songTitle || allSongsList[ds].SongTitle || "";
                     foundSong = allSongsList[ds];
                     log.info("Song found!");
                     log.info("Song Title: " + deletedSongTitle);
@@ -386,7 +391,9 @@ handlers.videoAppWorkflow = function (args, context) {
                 var deleteNotifResult = sendNotification(
                     deletedSongOwnerId,
                     "Song Removed",
-                    "Your song '" + deletedSongTitle + "' has been removed from the platform.",
+                    deletedSongTitle
+                        ? "Your song '" + deletedSongTitle + "' has been removed from the platform."
+                        : "Your song has been removed from the platform.",
                     "audio_deleted",
                     { songId: songIdToDelete, songTitle: deletedSongTitle }
                 );

@@ -937,7 +937,10 @@
       try {
         const res = await KangiService.approveSong(songId);
         if (res && res.success) {
-          _alert(el.soundsAlert, 'success', 'Song approved successfully.');
+          const notifMsg = res.notificationSent
+            ? 'Song approved — owner notified ✓'
+            : 'Song approved (owner could not be notified — no uploader ID on record)';
+          _alert(el.soundsAlert, 'success', notifMsg);
           await _loadSongsData();
         } else {
           _alert(el.soundsAlert, 'error', res.error || 'Failed to approve song.');
@@ -957,7 +960,10 @@
       try {
         const res = await KangiService.deleteSong(songId);
         if (res && res.success) {
-          _alert(el.soundsAlert, 'success', 'Song deleted successfully.');
+          const notifMsg = res.notificationSent
+            ? 'Song deleted — owner notified ✓'
+            : 'Song deleted (owner could not be notified — no uploader ID on record)';
+          _alert(el.soundsAlert, 'success', notifMsg);
           await _loadSongsData();
         } else {
           _alert(el.soundsAlert, 'error', res.error || 'Failed to delete song.');
