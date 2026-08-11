@@ -327,6 +327,10 @@ const KangiService = (function () {
   /* Send a custom notification to a user by PlayFab ID */
   function sendNotification(targetPlayFabId, title, message, type, data) {
     return new Promise((resolve, reject) => {
+      if (!targetPlayFabId) {
+        resolve({ success: false, error: 'No PlayFab ID provided for notification target.' });
+        return;
+      }
       PlayFabClientSDK.ExecuteCloudScript(
         {
           FunctionName:            'notificationWorkflow',
@@ -343,8 +347,9 @@ const KangiService = (function () {
         (result, error) => {
           if (error) { reject(_friendlyError(error)); return; }
           const fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server.'); return; }
-          if (fn.error) { reject(fn.error); return; }
+          if (!fn) { resolve({ success: false, error: 'No response from server.' }); return; }
+          // fn.error means a handled server-side failure — resolve so caller can show it
+          if (fn.error && !fn.success) { resolve({ success: false, error: fn.error }); return; }
           resolve(fn);
         }
       );

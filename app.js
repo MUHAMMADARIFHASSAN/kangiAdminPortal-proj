@@ -119,7 +119,7 @@
   /* ─── View metadata ─── */
   const VIEWS = {
     dashboard: { title: 'Dashboard',  sub: 'Overview of your NFT collection and activity' },
-    create:    { title: 'Create NFT', sub: 'Upload an NFT image and generate unique QR codes' },
+    create:    { title: 'Create TCG QR', sub: 'Upload an NFT image and generate unique QR codes' },
     manage:    { title: 'Manage QRs', sub: 'Browse all NFT batches, download QRs and copy redeem links' },
     sounds:    { title: 'Sounds Library', sub: 'Approve or delete audio files submitted to the server' },
     redeem:    { title: 'Redeem',     sub: 'Verify and process a one-time QR code redemption' },
@@ -1423,8 +1423,14 @@
           : [])
     ].filter(Boolean);
     btns.forEach(b => { b.disabled = true; });
-    try { await fn(); }
-    finally { btns.forEach(b => { b.disabled = false; }); }
+    try {
+      await fn();
+    } catch (err) {
+      _modalAlert('error', typeof err === 'string' ? err : (err?.message || 'Action failed. Check console for details.'));
+      console.error('[Kangi] Modal action error:', err);
+    } finally {
+      btns.forEach(b => { b.disabled = false; });
+    }
   }
 
   /* Helper — show alert inside the modal */
