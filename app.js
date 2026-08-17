@@ -118,9 +118,9 @@
 
   /* ─── View metadata ─── */
   const VIEWS = {
-    dashboard: { title: 'Dashboard',  sub: 'Overview of your NFT collection and activity' },
-    create:    { title: 'Create TCG QR', sub: 'Upload an NFT image and generate unique QR codes' },
-    manage:    { title: 'Manage QRs', sub: 'Browse all NFT batches, download QRs and copy redeem links' },
+    dashboard: { title: 'Dashboard',  sub: 'Overview of your TCG collection and activity' },
+    create:    { title: 'Create TCG QR', sub: 'Upload a TCG image and generate unique QR codes' },
+    manage:    { title: 'Manage QRs', sub: 'Browse all TCG batches, download QRs and copy redeem links' },
     sounds:    { title: 'Sounds Library', sub: 'Approve or delete audio files submitted to the server' },
     redeem:    { title: 'Redeem',     sub: 'Verify and process a one-time QR code redemption' },
     users:     { title: 'User Management', sub: 'Grant or revoke administrator access for platform users' },
@@ -413,10 +413,10 @@
     }, 40);
   }
 
-  /* ─── Recent NFTs (dashboard) ─── */
+  /* ─── Recent TCGs (dashboard) ─── */
   function _renderRecent() {
     if (!state.nfts.length) {
-      el.recentList.innerHTML = _emptyHTML('No NFTs created yet');
+      el.recentList.innerHTML = _emptyHTML('No TCGs created yet');
       return;
     }
     el.recentList.innerHTML = state.nfts.slice(0, 5).map(nft => {
@@ -435,14 +435,14 @@
     }).join('');
   }
 
-  /* ─── NFT Library (Manage QRs) ─── */
+  /* ─── TCG Library (Manage QRs) ─── */
   function _renderLibrary() {
     if (!state.nfts.length) {
       el.nftLibrary.innerHTML = `
         <div class="empty-state">
           ${_nftSvg()}
-          <p>No NFTs in your library yet</p>
-          <button class="btn btn-primary btn-sm" onclick="document.querySelector('[data-view=create]').click()">Create your first NFT</button>
+          <p>No TCGs in your library yet</p>
+          <button class="btn btn-primary btn-sm" onclick="document.querySelector('[data-view=create]').click()">Create your first TCG</button>
         </div>`;
       return;
     }
@@ -566,7 +566,7 @@
             a.download = `${btn.dataset.token}.png`;
             a.click();
           } else {
-            alert('Please open the NFT panel first so the QR can render, then download.');
+            alert('Please open the TCG panel first so the QR can render, then download.');
           }
         }
 
@@ -630,7 +630,7 @@
       const count     = Number(el.nftCount.value);
 
       if (!character) return _alert(el.createAlert, 'error', 'Please select a character.');
-      if (!file)      return _alert(el.createAlert, 'error', 'Please upload an NFT image.');
+      if (!file)      return _alert(el.createAlert, 'error', 'Please upload a TCG image.');
       if (count < 1)  return _alert(el.createAlert, 'error', 'QR quantity must be at least 1.');
       if (count > 50) return _alert(el.createAlert, 'error', 'Maximum 50 QR codes per batch.');
 
@@ -638,7 +638,7 @@
       const cloudConfig = KangiService.getCloudinaryConfig();
       if (!cloudConfig) {
         _alert(el.createAlert, 'error',
-          '⚠️ Cloudinary not configured. Go to Settings → NFT Image Storage.');
+          '⚠️ Cloudinary not configured. Go to Settings → TCG Image Storage.');
         return;
       }
 
@@ -696,7 +696,7 @@
           await _loadAllData();
           setTimeout(() => _switchView('manage'), 900);
         } else {
-          _alert(el.createAlert, 'error', (res && res.error) || 'Failed to save NFT. Please try again.');
+          _alert(el.createAlert, 'error', (res && res.error) || 'Failed to save TCG. Please try again.');
         }
 
       } catch (err) {
@@ -982,7 +982,7 @@
      ================================================================ */
   function _bindClearAll() {
     el.clearAllBtn.addEventListener('click', async () => {
-      if (!confirm('⚠️ This will permanently delete ALL NFT data from the database.\n\nThis cannot be undone. Continue?')) return;
+      if (!confirm('⚠️ This will permanently delete ALL TCG data from the database.\n\nThis cannot be undone. Continue?')) return;
 
       el.clearAllBtn.disabled    = true;
       el.clearAllBtn.textContent = 'Clearing…';
@@ -1673,7 +1673,7 @@
   }
 
   async function _loadMessages() {
-    const list = document.getElementById('messagesList');
+    const list  = document.getElementById('messagesList');
     const alert = document.getElementById('messagesAlert');
     if (!list) return;
 
@@ -1685,18 +1685,34 @@
 
     try {
       const res = await KangiService.getSupportMessages();
-      const messages = (res && Array.isArray(res.messages)) ? res.messages : [];
+
+      console.log('[DWM] getSupportMessages result:', res);
+
+      if (!res || res.error) {
+        const errMsg = (res && res.error) || 'Server returned an error.';
+        list.innerHTML = `<div class="empty-state"><p style="color:var(--red);">${_esc(errMsg)}</p></div>`;
+        if (alert) _alert(alert, 'error', errMsg);
+        return;
+      }
+
+      const messages = Array.isArray(res.messages) ? res.messages : [];
 
       if (alert) {
-        _alert(alert, 'info',
-          `${messages.length} message${messages.length !== 1 ? 's' : ''} · ${res.openCount || 0} open`);
-        setTimeout(() => alert.classList.add('hidden'), 3000);
+        if (messages.length === 0) {
+          alert.classList.add('hidden');
+        } else {
+          _alert(alert, 'info',
+            `${messages.length} message${messages.length !== 1 ? 's' : ''} · ${res.openCount || 0} open`);
+          setTimeout(() => alert.classList.add('hidden'), 3000);
+        }
       }
 
       _renderMessages(messages);
     } catch (err) {
-      list.innerHTML = `<div class="empty-state"><p style="color:var(--red);">Failed to load messages.</p></div>`;
-      if (alert) _alert(alert, 'error', typeof err === 'string' ? err : 'Could not load messages.');
+      console.error('[DWM] _loadMessages error:', err);
+      const msg = typeof err === 'string' ? err : (err?.message || 'Could not load messages.');
+      list.innerHTML = `<div class="empty-state"><p style="color:var(--red);">${_esc(msg)}</p></div>`;
+      if (alert) _alert(alert, 'error', msg);
     }
   }
 

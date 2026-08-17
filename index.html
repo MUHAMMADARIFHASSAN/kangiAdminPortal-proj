@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dance With Mii! — NFT QR Manager</title>
-  <meta name="description" content="Create NFT batches, generate unique QR codes, and manage secure one-time redemptions." />
+  <title>Dance With Mii! — TCG QR Manager</title>
+  <meta name="description" content="Create TCG batches, generate unique QR codes, and manage secure one-time redemptions." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://download.playfab.com/PlayFabClientApi.js"></script>
@@ -24,8 +24,8 @@
           <img src="Logo.png" alt="Dance With Mii! Logo" class="brand-logo-img brand-logo-img--lg" />
         </div>
         <div class="auth-brand-headline">
-          <h2>Explore NFT QR &amp; Audio collections in one place.</h2>
-          <p>Kangi Admin Dashboard gives you instant access to PlayFab NFT batches, unique QR code redemptions, and music sound approvals.</p>
+          <h2>Explore TCG QR &amp; Audio collections in one place.</h2>
+          <p>Kangi Admin Dashboard gives you instant access to PlayFab TCG batches, unique QR code redemptions, and music sound approvals.</p>
         </div>
         <div class="auth-brand-footer">
           <span class="auth-brand-badge">● Dance With Mii! Virtual Assets Dashboard</span>
@@ -84,7 +84,7 @@
       <img src="Logo.png" alt="Dance With Mii! Logo" class="brand-logo-img brand-logo-img--sm" />
       <div>
         <span class="brand-name">Dance With Mii!</span>
-        <span class="brand-sub">NFT QR Manager</span>
+        <span class="brand-sub">TCG QR Manager</span>
       </div>
     </div>
     <nav class="sidebar-nav">
@@ -144,7 +144,7 @@
         </button>
         <div>
           <h2 id="pageTitle">Dashboard</h2>
-          <p id="pageSubtitle" class="page-sub">Overview of your NFT collection</p>
+          <p id="pageSubtitle" class="page-sub">Overview of your TCG collection</p>
         </div>
       </div>
       <div class="topbar-right">
@@ -167,7 +167,7 @@
             <div class="stat-icon stat-icon--purple">
               <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 17a1 1 0 001.447.894l4-2A1 1 0 0017 15V9.236a1 1 0 00-1.447-.894l-4 2a1 1 0 00-.553.894V17zM15.211 6.276a1 1 0 000-1.788l-4.764-2.382a1 1 0 00-.894 0L4.789 4.488a1 1 0 000 1.788l4.764 2.382a1 1 0 00.894 0l4.764-2.382zM4.447 8.342A1 1 0 003 9.236V15a1 1 0 00.553.894l4 2A1 1 0 009 17v-5.764a1 1 0 00-.553-.894l-4-2z"/></svg>
             </div>
-            <div class="stat-body"><strong id="statNfts">0</strong><span>Total NFTs</span></div>
+            <div class="stat-body"><strong id="statNfts">0</strong><span>Total TCGs</span></div>
           </div>
           <div class="stat-card">
             <div class="stat-icon stat-icon--teal">
@@ -184,23 +184,23 @@
         </div>
         <div class="dash-grid dash-grid--single">
           <div class="card">
-            <div class="card-header"><h3>Recent NFTs</h3></div>
+            <div class="card-header"><h3>Recent TCGs</h3></div>
             <div id="recentNftsList" class="card-body">
               <div class="empty-state">
                 <svg viewBox="0 0 40 40" fill="none"><rect x="5" y="5" width="30" height="30" rx="6" stroke="currentColor" stroke-width="2"/><path d="M13 27V13h5l7 9V13h5v14h-5L18 18v9h-5Z" fill="currentColor"/></svg>
-                <p>No NFTs yet</p>
+                <p>No TCGs yet</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- CREATE NFT -->
+      <!-- CREATE TCG -->
       <section id="createView" class="view">
         <div class="card">
           <div class="card-header">
-            <h3>New NFT Batch</h3>
-            <p>Create an NFT and generate multiple unique QR codes for distribution.</p>
+            <h3>New TCG Batch</h3>
+            <p>Create a TCG and generate multiple unique QR codes for distribution.</p>
           </div>
           <div class="card-body">
             <div id="createAlert" class="alert hidden"></div>
@@ -228,15 +228,15 @@
                 </div>
               </div>
 
-              <!-- Row 2: NFT Name suffix (full width) -->
+              <!-- Row 2: TCG Name suffix (full width) -->
               <div class="field-group">
-                <label for="nftName">NFT Name <span class="optional">(optional suffix)</span></label>
+                <label for="nftName">TCG Name <span class="optional">(optional suffix)</span></label>
                 <input id="nftName" type="text" placeholder="e.g. #001 Shiny Edition" />
               </div>
 
               <!-- Row 3: Image upload -->
               <div class="field-group">
-                <label for="nftImage">NFT Image</label>
+                <label for="nftImage">TCG Image</label>
                 <div class="file-input-bar" id="fileDrop">
                   <input id="nftImage" type="file" accept="image/*" required class="file-input" />
                   <div class="file-input-content">
@@ -268,8 +268,8 @@
         <div class="card">
           <div class="card-header card-header--between">
             <div>
-              <h3>NFT Library</h3>
-              <p>All NFT batches and their unique QR codes.</p>
+              <h3>TCG Library</h3>
+              <p>All TCG batches and their unique QR codes.</p>
             </div>
             <button id="clearAllBtn" class="btn btn-danger btn-sm" style="justify-content:center;">
               <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
@@ -279,8 +279,8 @@
           <div class="card-body" id="nftLibrary">
             <div class="empty-state">
               <svg viewBox="0 0 40 40" fill="none"><rect x="5" y="5" width="30" height="30" rx="6" stroke="currentColor" stroke-width="2"/><path d="M13 27V13h5l7 9V13h5v14h-5L18 18v9h-5Z" fill="currentColor"/></svg>
-              <p>No NFTs in your library yet</p>
-              <button class="btn btn-primary btn-sm" data-nav="create">Create your first NFT</button>
+              <p>No TCGs in your library yet</p>
+              <button class="btn btn-primary btn-sm" data-nav="create">Create your first TCG</button>
             </div>
           </div>
         </div>
@@ -347,7 +347,7 @@
           <div class="card-header card-header--between">
             <div>
               <h3>All Users</h3>
-              <p>Every registered player in the Dance With Mii! PlayFab title.</p>
+              <p>Every registered player in the Dance With Mii!</p>
             </div>
             <div style="display: flex; gap: 0.75rem; align-items: center;">
               <div class="input-wrap" style="width: 300px; margin: 0;">
@@ -463,7 +463,7 @@
               <div class="setting-item">
                 <div>
                   <span class="setting-title">Sync Data</span>
-                  <span class="setting-desc">Reload all PlayFab NFTs &amp; Sounds Library</span>
+                  <span class="setting-desc">Reload all PlayFab TCGs &amp; Sounds Library</span>
                 </div>
                 <button id="settingsRefreshBtn" class="btn btn-secondary btn-sm">Refresh Data</button>
               </div>

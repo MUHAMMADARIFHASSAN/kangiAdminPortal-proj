@@ -366,14 +366,22 @@ const KangiService = (function () {
           GeneratePlayStreamEvent: true
         },
         (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          // FunctionResult can be an object or a JSON string depending on the SDK version
-          let fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server.'); return; }
-          if (typeof fn === 'string') {
-            try { fn = JSON.parse(fn); } catch (e) { reject('Invalid server response.'); return; }
+          if (error) {
+            console.error('[DWM] supportWorkflow error:', error);
+            reject(_friendlyError(error));
+            return;
           }
-          if (fn.error && !fn.success) { reject(fn.error); return; }
+          // FunctionResult can be an object or a JSON string depending on SDK version
+          let fn = result?.data?.FunctionResult;
+          console.log('[DWM] supportWorkflow raw result:', JSON.stringify(fn));
+          if (!fn) { resolve({ success: false, messages: [], error: 'No response from server.' }); return; }
+          if (typeof fn === 'string') {
+            try { fn = JSON.parse(fn); } catch (e) {
+              resolve({ success: false, messages: [], error: 'Invalid server response.' });
+              return;
+            }
+          }
+          // Don't reject on server-side errors — resolve so caller can handle gracefully
           resolve(fn);
         }
       );
@@ -433,7 +441,7 @@ const KangiService = (function () {
     return new Promise((resolve) => {
       const config = getCloudinaryConfig();
       if (!config) {
-        resolve({ success: false, error: 'Cloudinary not configured. Go to Settings → NFT Image Storage and enter your credentials.' });
+        resolve({ success: false, error: 'Cloudinary not configured. Go to Settings → TCG Image Storage and enter your credentials.' });
         return;
       }
 

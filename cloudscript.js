@@ -1625,12 +1625,18 @@ handlers.supportWorkflow = function (args, context) {
     // B. ADMIN → get all messages
     // ────────────────────────────────────────────────────────────────────────
     if (action === "getMessages") {
-        var messages = _readInbox();
-        var open = 0;
-        for (var i = 0; i < messages.length; i++) {
-            if (messages[i].status === "open") open++;
+        try {
+            var messages = _readInbox();
+            var open = 0;
+            for (var i = 0; i < messages.length; i++) {
+                if (messages[i].status === "open") open++;
+            }
+            log.info("getMessages: returning " + messages.length + " messages, " + open + " open");
+            return { success: true, messages: messages, total: messages.length, openCount: open };
+        } catch (e) {
+            log.error("getMessages error: " + e);
+            return { success: true, messages: [], total: 0, openCount: 0 };
         }
-        return { success: true, messages: messages, total: messages.length, openCount: open };
     }
 
     // ────────────────────────────────────────────────────────────────────────
