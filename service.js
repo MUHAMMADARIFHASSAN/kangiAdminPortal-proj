@@ -525,7 +525,8 @@ const KangiService = (function () {
     dbType:            "firestore",
     collectionName:    "users",
     adminEmail:        "alisiyal2764@gmail.com",
-    adminPassword:     "Kasahn@1"
+    adminPassword:     "Kashan@1",
+    databaseURL:       ""
   };
 
   /* Default or saved Firebase Config */
@@ -544,13 +545,16 @@ const KangiService = (function () {
               overrides[k] = parsed[k];
             }
           });
+          if (overrides.adminPassword === 'Kasahn@1') {
+            overrides.adminPassword = DEFAULT_FIREBASE_CONFIG.adminPassword;
+          }
           return { ...DEFAULT_FIREBASE_CONFIG, ...overrides };
         }
       }
     } catch (e) {
       console.warn('[Firebase] Failed to parse saved config:', e);
     }
-    return DEFAULT_FIREBASE_CONFIG;
+    return { ...DEFAULT_FIREBASE_CONFIG };
   }
 
   /* Save Firebase Config */

@@ -200,13 +200,11 @@
       try {
         const res = await KangiService.login(email, password);
         if (el.firebaseSettingsCard) {
-          // Firebase now signs in with its own built-in default credentials, so
-          // this card only needs to appear if that connection actually fails.
+          el.firebaseSettingsCard.style.display = 'none';
           try {
             await KangiService.ensureFirebaseAuth();
-            el.firebaseSettingsCard.style.display = 'none';
           } catch (e) {
-            el.firebaseSettingsCard.style.display = '';
+            console.warn('[Firebase] Auth status:', e);
           }
         }
         _onLoginSuccess(res);
