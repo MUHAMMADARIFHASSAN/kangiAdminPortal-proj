@@ -183,6 +183,19 @@ const KangiService = (function () {
   /* Approve a pending song */
   function approveSong(songId) { return _callVideoScript('approveSong', { adminData: { songId } }); }
 
+  /* Update which modes a song appears in, and its trim window (seconds).
+     trimEnd of 0 means play to the natural end of the file. */
+  function updateSongSettings(songId, modes, trimStart, trimEnd) {
+    return _callVideoScript('updateSongSettings', {
+      adminData: {
+        songId:    songId,
+        modes:     Array.isArray(modes) ? modes : [],
+        trimStart: Number(trimStart) || 0,
+        trimEnd:   Number(trimEnd)   || 0
+      }
+    });
+  }
+
   /* Delete a song from server catalog */
   function deleteSong(songId) { return _callVideoScript('deleteSong', { adminData: { songId } }); }
 
@@ -216,7 +229,7 @@ const KangiService = (function () {
   /* Revoke admin role — accepts email or playFabId */
   function revokeAdmin(email, playFabId) { return _callAdminScript('revokeAdmin', { email: email || '', playFabId: playFabId || '' }); }
 
-  /* Register current user into the shared registry (call on every login) */
+  /* Register current user — no-op acknowledgment, kept for compatibility */
   function registerUser() {
     return _callAdminScript('registerUser', {
       email:       session.email       || '',
@@ -225,8 +238,23 @@ const KangiService = (function () {
     });
   }
 
-  /* Fetch all registered users from registry */
-  function getAllUsers() { return _callAdminScript('getAllUsers', {}); }
+  /* Step 1: Start a PlayFab export for all players in the given segment.
+     Returns { exportId, status:'pending' } or { success:false, error } */
+  function getAllUsers(segmentId) {
+    return _callAdminScript('getAllUsers', {
+      segmentId: segmentId || ''
+    });
+  }
+
+  /* Step 2: Poll/download the export started by getAllUsers.
+     Returns { status:'pending' } while processing, or
+             { status:'complete', users:[...] } when done. */
+  function getExportResult(exportId, segmentId) {
+    return _callAdminScript('getExportResult', {
+      exportId:  exportId  || '',
+      segmentId: segmentId || ''
+    });
+  }
 
   /* Ban a user — accepts email, playFabId, and optional duration in days (0 = permanent) */
   function banUser(email, playFabId, durationDays)   { 
@@ -262,6 +290,12 @@ const KangiService = (function () {
 
   /* Unban a user — accepts email or playFabId */
   function unbanUser(email, playFabId) { return _callAdminScript('unbanUser', { email: email || '', playFabId: playFabId || '' }); }
+
+  /* Premium — grants or revokes the ability to upload music. Sets IsPremium in
+     the player's PlayFab UserData, which the Unity client reads before showing
+     the upload screen. */
+  function makePremium(email, playFabId)   { return _callAdminScript('makePremium',   { email: email || '', playFabId: playFabId || '' }); }
+  function revokePremium(email, playFabId) { return _callAdminScript('revokePremium', { email: email || '', playFabId: playFabId || '' }); }
 
   /* ============================================================
      IMAGE UTIL — resize + compress before storing
@@ -473,6 +507,331 @@ const KangiService = (function () {
     });
   }
 
+  /* ============================================================
+     FIREBASE SERVICE — Player List Source
+     Fetches player list from Cloud Firestore or Realtime Database.
+     ============================================================ */
+
+  const FIREBASE_CONFIG_KEY = 'kangi_firebase_config';
+
+  const DEFAULT_FIREBASE_CONFIG = {
+    apiKey:            "AIzaSyBArP6gJqVhhdDTZ2XLINBYIvPMmON7EFM",
+    authDomain:        "dance-withmii.firebaseapp.com",
+    projectId:         "dance-withmii",
+    storageBucket:     "dance-withmii.firebasestorage.app",
+    messagingSenderId: "227901605532",
+    appId:             "1:227901605532:web:a01759182a1d1546db4f59",
+    measurementId:     "G-ZPTK46HEBC",
+    dbType:            "firestore",
+    collectionName:    "users",
+    adminEmail:        "alisiyal2764@gmail.com",
+    adminPassword:     "Kasahn@1"
+  };
+
+  /* Default or saved Firebase Config */
+  function getFirebaseConfig() {
+    try {
+      const saved = localStorage.getItem(FIREBASE_CONFIG_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.projectId || parsed.apiKey) {
+          // Only let saved keys with a real value win. A config saved from the
+          // Settings form before the admin credentials were hardcoded stores
+          // them as "", which would otherwise clobber the defaults below.
+          const overrides = {};
+          Object.keys(parsed).forEach(k => {
+            if (parsed[k] !== '' && parsed[k] !== null && parsed[k] !== undefined) {
+              overrides[k] = parsed[k];
+            }
+          });
+          return { ...DEFAULT_FIREBASE_CONFIG, ...overrides };
+        }
+      }
+    } catch (e) {
+      console.warn('[Firebase] Failed to parse saved config:', e);
+    }
+    return DEFAULT_FIREBASE_CONFIG;
+  }
+
+  /* Save Firebase Config */
+  function saveFirebaseConfig(config) {
+    try {
+      if (!config) {
+        localStorage.removeItem(FIREBASE_CONFIG_KEY);
+        return true;
+      }
+      localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
+      // Drop any cached session so edited credentials take effect immediately.
+      _adminAuthPromise = null;
+      try {
+        if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+          firebase.auth().signOut();
+        }
+      } catch (eSignOut) {}
+      // Re-init if SDK available
+      initFirebase(config);
+      return true;
+    } catch (e) {
+      console.error('[Firebase] Save config error:', e);
+      return false;
+    }
+  }
+
+  /* Initialize Firebase App instance */
+  let _firebaseApp = null;
+  function initFirebase(customConfig) {
+    if (typeof firebase === 'undefined') {
+      console.warn('[Firebase] Firebase SDK not loaded in window.');
+      return null;
+    }
+    const config = customConfig || getFirebaseConfig();
+    if (!config || (!config.apiKey && !config.projectId)) {
+      return null;
+    }
+    try {
+      if (firebase.apps && firebase.apps.length > 0) {
+        // Find or delete existing default app if config changed
+        _firebaseApp = firebase.apps[0];
+      } else {
+        _firebaseApp = firebase.initializeApp({
+          apiKey:            config.apiKey,
+          authDomain:        config.authDomain || (config.projectId ? `${config.projectId}.firebaseapp.com` : undefined),
+          projectId:         config.projectId,
+          storageBucket:     config.storageBucket || (config.projectId ? `${config.projectId}.appspot.com` : undefined),
+          messagingSenderId: config.messagingSenderId,
+          appId:             config.appId,
+          databaseURL:       config.databaseURL
+        });
+      }
+      return _firebaseApp;
+    } catch (err) {
+      console.error('[Firebase] initFirebase error:', err);
+      return null;
+    }
+  }
+
+  /* Sign in to Firebase Auth as the admin.
+
+     Firestore rules scope the players collection to known uids, so an
+     unauthenticated read is rejected. Resolves to the signed-in user, or throws
+     with a message the settings panel can surface. */
+  let _adminAuthPromise = null;
+  async function ensureFirebaseAuth(config) {
+    const cfg = config || getFirebaseConfig();
+    if (typeof firebase === 'undefined' || !firebase.auth) {
+      throw new Error('Firebase Auth SDK is not loaded.');
+    }
+
+    // The app must exist before firebase.auth() is usable — callers reaching
+    // here directly (e.g. the post-login card check) may be the first to touch it.
+    initFirebase(cfg);
+
+    const current = firebase.auth().currentUser;
+    if (current) return current;
+
+    if (!cfg.adminEmail || !cfg.adminPassword) {
+      throw new Error('Firebase admin sign-in is not configured. Add the admin email and password in Settings.');
+    }
+
+    // Collapse concurrent callers onto one sign-in round trip.
+    if (!_adminAuthPromise) {
+      _adminAuthPromise = firebase.auth()
+        .signInWithEmailAndPassword(cfg.adminEmail, cfg.adminPassword)
+        .then(cred => cred.user)
+        .catch(err => {
+          _adminAuthPromise = null;
+          throw new Error('Firebase admin sign-in failed: ' + (err.message || err.code || 'unknown error'));
+        });
+    }
+    return _adminAuthPromise;
+  }
+
+  /* Opportunistic Firebase sign-in using the SAME credentials the admin just
+     used to log into this dashboard (PlayFab). The two systems are separate —
+     Firebase Auth was provisioned with a matching email, but there is no
+     guarantee the passwords match, so this is a convenience, not a dependency.
+
+     On success: Settings never needs to be touched, on any device, by any
+     admin who shares this login. On failure: swallowed entirely. Dashboard
+     login has already succeeded by the time this runs, so a Firebase mismatch
+     must never surface as a login error — the existing Settings flow remains
+     the fallback. Nothing here is written to localStorage. */
+  async function tryAutoFirebaseAuth(email, password) {
+    try {
+      if (typeof firebase === 'undefined' || !firebase.auth) return false;
+      initFirebase(getFirebaseConfig());
+      if (firebase.auth().currentUser) return true;
+
+      await firebase.auth().signInWithEmailAndPassword(email, password);
+      return true;
+    } catch (err) {
+      console.log('[Firebase] Auto sign-in did not match dashboard credentials — Settings will be needed.', err.code || err.message);
+      return false;
+    }
+  }
+
+  /* Test connection to Firebase */
+  async function testFirebaseConnection(config) {
+    const app = initFirebase(config);
+    if (!app && typeof firebase === 'undefined') {
+      return { success: false, error: 'Firebase SDK is not available in browser.' };
+    }
+    const cfg = config || getFirebaseConfig();
+    if (!cfg || (!cfg.apiKey && !cfg.projectId)) {
+      return { success: false, error: 'Firebase configuration is empty. Please enter Project ID and API Key.' };
+    }
+
+    const dbType = cfg.dbType || 'firestore';
+    const collectionName = (cfg.collectionName || 'users').trim();
+
+    try {
+      await ensureFirebaseAuth(cfg);
+
+      if (dbType === 'rtdb') {
+        if (!cfg.databaseURL) {
+          return { success: false, error: 'Realtime Database requires a Database URL (e.g. https://<project>.firebaseio.com).' };
+        }
+        const db = firebase.database();
+        const snapshot = await db.ref(collectionName).limitToFirst(5).once('value');
+        const count = snapshot.numChildren ? snapshot.numChildren() : 0;
+        return { success: true, message: `Connected to Realtime Database successfully! Found ${count} record(s).` };
+      } else {
+        const db = firebase.firestore();
+        const snapshot = await db.collection(collectionName).limit(5).get();
+        return { success: true, message: `Connected to Cloud Firestore successfully! Found ${snapshot.size} document(s) in "${collectionName}".` };
+      }
+    } catch (err) {
+      console.error('[Firebase] Connection test error:', err);
+      return { success: false, error: err.message || 'Failed to connect to Firebase.' };
+    }
+  }
+
+  /* Fetch all player records from Firebase and normalize structure */
+  async function getFirebaseUsers() {
+    const cfg = getFirebaseConfig();
+    if (!cfg || (!cfg.apiKey && !cfg.projectId)) {
+      console.log('[Firebase] No Firebase config saved, falling back to live PlayFab registry.');
+      const pfResult = await getAllUsers();
+      if (pfResult && pfResult.status === 'complete' && Array.isArray(pfResult.users)) {
+        return {
+          source: 'playfab-fallback',
+          users: pfResult.users,
+          isFallback: true
+        };
+      }
+      return { source: 'none', users: [], isFallback: true };
+    }
+
+    const app = initFirebase(cfg);
+    if (!app && typeof firebase === 'undefined') {
+      throw new Error('Firebase SDK is not loaded.');
+    }
+
+    await ensureFirebaseAuth(cfg);
+
+    const dbType = cfg.dbType || 'firestore';
+    const collectionName = (cfg.collectionName || 'users').trim();
+    let rawList = [];
+
+    if (dbType === 'rtdb') {
+      const db = firebase.database();
+      const snapshot = await db.ref(collectionName).once('value');
+      const val = snapshot.val();
+      if (val) {
+        if (Array.isArray(val)) {
+          rawList = val.filter(Boolean);
+        } else if (typeof val === 'object') {
+          rawList = Object.keys(val).map(key => ({ _fbKey: key, ...val[key] }));
+        }
+      }
+    } else {
+      const db = firebase.firestore();
+      const snapshot = await db.collection(collectionName).get();
+      snapshot.forEach(doc => {
+        rawList.push({ _fbDocId: doc.id, ...doc.data() });
+      });
+    }
+
+    // Normalize each user record
+    const normalizedUsers = rawList.map(item => {
+      const playFabId = item.playFabId || item.PlayFabId || item.playfabId || item.playfab_id || item.uid || item.userId || item._fbDocId || item._fbKey || '';
+      const displayName = item.displayName || item.DisplayName || item.name || item.Name || item.playerName || item.player_name || item.username || item.userName || '';
+      const email = item.email || item.Email || item.userEmail || '';
+      const avatarUrl = item.avatarUrl || item.avatar || item.photoURL || item.photoUrl || item.image || item.imageUrl || '';
+      const isBanned = !!(item.isBanned || item.banned || item.banStatus);
+      const isAdmin = !!(item.isAdmin || item.admin || item.is_admin);
+      const created = item.createdAt || item.created || item.joined || item.created_at || null;
+      const lastLogin = item.lastLogin || item.last_login || item.lastSeen || item.updatedAt || null;
+
+      return {
+        playFabId: String(playFabId),
+        displayName: displayName || (email ? email.split('@')[0] : (playFabId ? 'Player ' + String(playFabId).slice(-4) : 'Player')),
+        email: email,
+        username: item.username || '',
+        avatarUrl: avatarUrl,
+        isBanned: isBanned,
+        isAdmin: isAdmin,
+        created: created ? (typeof created === 'object' && created.toDate ? created.toDate().toISOString() : created) : null,
+        lastLogin: lastLogin ? (typeof lastLogin === 'object' && lastLogin.toDate ? lastLogin.toDate().toISOString() : lastLogin) : null,
+        unlockedCharacters: Array.isArray(item.unlockedCharacters) ? item.unlockedCharacters : [],
+        rawFirebaseData: item
+      };
+    });
+
+    // Sort alphabetically by displayName / name
+    normalizedUsers.sort((a, b) => {
+      const nameA = (a.displayName || a.username || a.email || '').toLowerCase();
+      const nameB = (b.displayName || b.username || b.email || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    return {
+      source: 'firebase',
+      collection: collectionName,
+      dbType: dbType,
+      users: normalizedUsers,
+      isFallback: false
+    };
+  }
+
+  /* Fetch comprehensive internal details on-demand via PlayFab API */
+  async function getPlayFabUserDetails(playFabId) {
+    if (!playFabId) {
+      return { success: false, error: 'No PlayFab ID provided.' };
+    }
+
+    try {
+      const [charRes, notifRes] = await Promise.allSettled([
+        getUserCharacters(playFabId),
+        getNotifications(playFabId)
+      ]);
+
+      const unlockedCharacters = (charRes.status === 'fulfilled' && charRes.value && Array.isArray(charRes.value.unlockedCharacters))
+        ? charRes.value.unlockedCharacters
+        : [];
+
+      const notifications = (notifRes.status === 'fulfilled' && notifRes.value && Array.isArray(notifRes.value.notifications))
+        ? notifRes.value.notifications
+        : [];
+
+      return {
+        success: true,
+        playFabId,
+        unlockedCharacters,
+        notifications
+      };
+    } catch (err) {
+      console.error('[PlayFab] Error fetching internal details for', playFabId, err);
+      return {
+        success: false,
+        playFabId,
+        unlockedCharacters: [],
+        notifications: [],
+        error: err?.message || 'Failed to fetch PlayFab internal data.'
+      };
+    }
+  }
+
   /* ── Public API ── */
   return {
     init,
@@ -487,12 +846,16 @@ const KangiService = (function () {
     getSongs,
     approveSong,
     deleteSong,
+    updateSongSettings,
     makeAdmin,
     revokeAdmin,
     registerUser,
     getAllUsers,
+    getExportResult,
     banUser,
     unbanUser,
+    makePremium,
+    revokePremium,
     getUserCharacters,
     sendNotification,
     getNotifications,
@@ -501,7 +864,17 @@ const KangiService = (function () {
     deleteSupportMessage,
     getCloudinaryConfig,
     saveCloudinaryConfig,
-    uploadToCloudinary
+    uploadToCloudinary,
+    // Firebase & PlayFab Deep Fetch APIs
+    getFirebaseConfig,
+    saveFirebaseConfig,
+    initFirebase,
+    testFirebaseConnection,
+    ensureFirebaseAuth,
+    tryAutoFirebaseAuth,
+    getFirebaseUsers,
+    getPlayFabUserDetails
   };
 
 })();
+

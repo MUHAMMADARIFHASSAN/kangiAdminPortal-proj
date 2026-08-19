@@ -45,6 +45,8 @@
     statNfts:       $('statNfts'),
     statCodes:      $('statCodes'),
     statRedeemed:   $('statRedeemed'),
+    statUsers:      $('statUsers'),
+    dashUsersList:  $('dashUsersList'),
     recentList:     $('recentNftsList'),
 
     /* Create */
@@ -97,7 +99,24 @@
     modalUnbanBtn:      $('modalUnbanBtn'),
     modalNotifInput:    $('modalNotifInput'),
     modalSendNotifBtn:  $('modalSendNotifBtn'),
+    modalMakePremiumBtn:   $('modalMakePremiumBtn'),
+    modalRevokePremiumBtn: $('modalRevokePremiumBtn'),
+    banSectionLabel:    $('banSectionLabel'),
     modalActionAlert:   $('modalActionAlert'),
+    /* Firebase Configuration */
+    fbDatabaseType:     $('fbDatabaseType'),
+    fbCollectionName:   $('fbCollectionName'),
+    fbProjectId:        $('fbProjectId'),
+    fbApiKey:           $('fbApiKey'),
+    fbAuthDomain:       $('fbAuthDomain'),
+    fbDatabaseUrl:      $('fbDatabaseUrl'),
+    fbAdminEmail:       $('fbAdminEmail'),
+    fbAdminPassword:    $('fbAdminPassword'),
+    fbJsonConfig:       $('fbJsonConfig'),
+    saveFirebaseBtn:    $('saveFirebaseBtn'),
+    testFirebaseBtn:    $('testFirebaseBtn'),
+    firebaseSettingsCard:$('firebaseSettingsCard'),
+    firebaseConfigAlert:$('firebaseConfigAlert'),
     /* Ban Duration Modal (kept for legacy, no longer used for ban flow) */
     banDurationModal:   $('banDurationModal'),
     closeBanModal:      $('closeBanModal'),
@@ -180,6 +199,16 @@
 
       try {
         const res = await KangiService.login(email, password);
+        if (el.firebaseSettingsCard) {
+          // Firebase now signs in with its own built-in default credentials, so
+          // this card only needs to appear if that connection actually fails.
+          try {
+            await KangiService.ensureFirebaseAuth();
+            el.firebaseSettingsCard.style.display = 'none';
+          } catch (e) {
+            el.firebaseSettingsCard.style.display = '';
+          }
+        }
         _onLoginSuccess(res);
       } catch (msg) {
         _alert(el.loginAlert, 'error', msg);
@@ -204,9 +233,6 @@
     _switchView('dashboard');
     _loadAllData();
     _checkHashRedeem();
-
-    /* Register this admin in the shared user registry (fire-and-forget) */
-    KangiService.registerUser().catch(() => {});
   }
 
   /* ================================================================
@@ -249,6 +275,114 @@
         el.settingsRefreshBtn.textContent = 'Refresh Data';
       });
     }
+
+    /* The JSON box mirrors the config for copy/paste; the admin password must
+       never be rendered into it as plain text. */
+    function _fbConfigForDisplay(cfg) {
+      const shown = { ...cfg };
+      if (shown.adminPassword) shown.adminPassword = '••••••••';
+      return shown;
+    }
+
+    /* ── Firebase Config — load saved values on page init ── */
+    const fbTypeInput       = el.fbDatabaseType;
+    const fbCollInput       = el.fbCollectionName;
+    const fbProjectInput    = el.fbProjectId;
+    const fbKeyInput        = el.fbApiKey;
+    const fbAuthInput       = el.fbAuthDomain;
+    const fbDbUrlInput      = el.fbDatabaseUrl;
+    const fbAdminEmailInput = el.fbAdminEmail;
+    const fbAdminPassInput  = el.fbAdminPassword;
+    const fbJsonInput       = el.fbJsonConfig;
+    const fbAlert           = el.firebaseConfigAlert;
+
+    const savedFbConfig = KangiService.getFirebaseConfig();
+    if (savedFbConfig) {
+      if (fbTypeInput)    fbTypeInput.value    = savedFbConfig.dbType || 'firestore';
+      if (fbCollInput)    fbCollInput.value    = savedFbConfig.collectionName || 'users';
+      if (fbProjectInput) fbProjectInput.value = savedFbConfig.projectId || '';
+      if (fbKeyInput)     fbKeyInput.value     = savedFbConfig.apiKey || '';
+      if (fbAuthInput)    fbAuthInput.value    = savedFbConfig.authDomain || '';
+      if (fbDbUrlInput)   fbDbUrlInput.value   = savedFbConfig.databaseURL || '';
+      if (fbAdminEmailInput) fbAdminEmailInput.value = savedFbConfig.adminEmail || '';
+      if (fbAdminPassInput)  fbAdminPassInput.value  = savedFbConfig.adminPassword || '';
+      if (fbJsonInput)    fbJsonInput.value    = JSON.stringify(_fbConfigForDisplay(savedFbConfig), null, 2);
+    }
+
+    // Auto-parse when pasting JSON into the JSON config box
+    fbJsonInput?.addEventListener('input', () => {
+      const raw = fbJsonInput.value.trim();
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.projectId && fbProjectInput) fbProjectInput.value = parsed.projectId;
+        if (parsed.apiKey && fbKeyInput) fbKeyInput.value = parsed.apiKey;
+        if (parsed.authDomain && fbAuthInput) fbAuthInput.value = parsed.authDomain;
+        if (parsed.databaseURL && fbDbUrlInput) {
+          fbDbUrlInput.value = parsed.databaseURL;
+          if (fbTypeInput) fbTypeInput.value = 'rtdb';
+        }
+        if (parsed.collectionName && fbCollInput) fbCollInput.value = parsed.collectionName;
+        if (parsed.dbType && fbTypeInput) fbTypeInput.value = parsed.dbType;
+      } catch (e) {
+        // user still typing JSON
+      }
+    });
+
+    // Save Firebase Config
+    el.saveFirebaseBtn?.addEventListener('click', () => {
+      const config = {
+        dbType:         fbTypeInput?.value || 'firestore',
+        collectionName: (fbCollInput?.value || 'users').trim(),
+        projectId:      fbProjectInput?.value.trim() || '',
+        apiKey:         fbKeyInput?.value.trim() || '',
+        authDomain:     fbAuthInput?.value.trim() || '',
+        databaseURL:    fbDbUrlInput?.value.trim() || '',
+        adminEmail:     fbAdminEmailInput?.value.trim() || '',
+        adminPassword:  fbAdminPassInput?.value || ''
+      };
+
+      if (!config.projectId && !config.apiKey) {
+        _alert(fbAlert, 'warning', 'Project ID and API Key are recommended for Firebase connection.');
+      }
+
+      KangiService.saveFirebaseConfig(config);
+      if (fbJsonInput) fbJsonInput.value = JSON.stringify(_fbConfigForDisplay(config), null, 2);
+      _alert(fbAlert, 'success', '✓ Firebase configuration saved.');
+      setTimeout(() => fbAlert?.classList.add('hidden'), 3500);
+    });
+
+    // Test Firebase Connection & Sync
+    el.testFirebaseBtn?.addEventListener('click', async () => {
+      const config = {
+        dbType:         fbTypeInput?.value || 'firestore',
+        collectionName: (fbCollInput?.value || 'users').trim(),
+        projectId:      fbProjectInput?.value.trim() || '',
+        apiKey:         fbKeyInput?.value.trim() || '',
+        authDomain:     fbAuthInput?.value.trim() || '',
+        databaseURL:    fbDbUrlInput?.value.trim() || '',
+        adminEmail:     fbAdminEmailInput?.value.trim() || '',
+        adminPassword:  fbAdminPassInput?.value || ''
+      };
+
+      el.testFirebaseBtn.disabled = true;
+      el.testFirebaseBtn.innerHTML = '<span class="btn-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px;"></span>Testing...';
+
+      const res = await KangiService.testFirebaseConnection(config);
+      el.testFirebaseBtn.disabled = false;
+      el.testFirebaseBtn.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+        Test Connection & Sync
+      `;
+
+      if (res.success) {
+        KangiService.saveFirebaseConfig(config);
+        _alert(fbAlert, 'success', `✓ ${res.message} Syncing data now...`);
+        await _loadAllData();
+      } else {
+        _alert(fbAlert, 'error', `✕ Connection Failed: ${res.error}`);
+      }
+    });
 
     /* ── Cloudinary config — load saved values on page init ── */
     const cloudNameInput  = $('cloudinaryCloudName');
@@ -377,8 +511,16 @@
      ================================================================ */
   async function _loadAllData() {
     try {
-      const res  = await KangiService.getNfts();
-      state.nfts = (res && Array.isArray(res.nfts)) ? res.nfts : [];
+      const [nftsRes, usersRes] = await Promise.allSettled([
+        KangiService.getNfts(),
+        _fetchAndEnrichUsers()
+      ]);
+
+      state.nfts = (nftsRes.status === 'fulfilled' && nftsRes.value && Array.isArray(nftsRes.value.nfts)) ? nftsRes.value.nfts : [];
+      if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
+        state.allUsers = usersRes.value;
+        state.filteredUsers = usersRes.value;
+      }
     } catch (e) {
       console.error('[Kangi] Data load error:', e);
       state.nfts = [];
@@ -388,8 +530,12 @@
 
   function _renderAll() {
     _renderStats();
+    _renderDashboardUsers();
     _renderRecent();
     _renderLibrary();
+    if (state.allUsers && state.allUsers.length && el.usersList) {
+      _renderUsers(state.filteredUsers && state.filteredUsers.length ? state.filteredUsers : state.allUsers);
+    }
   }
 
   /* ─── Stats ─── */
@@ -399,9 +545,11 @@
     _countUp(el.statNfts,     state.nfts.length);
     _countUp(el.statCodes,    codes.length);
     _countUp(el.statRedeemed, redeemed);
+    if (el.statUsers) _countUp(el.statUsers, (state.allUsers || []).length);
   }
 
   function _countUp(el, target) {
+    if (!el) return;
     const start = parseInt(el.textContent) || 0;
     if (start === target) return;
     const step = target > start ? 1 : -1;
@@ -411,6 +559,27 @@
       el.textContent = cur;
       if (cur === target) clearInterval(timer);
     }, 40);
+  }
+
+  /* ─── Registered Users (dashboard) ─── */
+  function _renderDashboardUsers() {
+    if (!el.dashUsersList) return;
+    const users = state.allUsers || [];
+    if (!users.length) {
+      el.dashUsersList.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+          <p>No registered players yet</p>
+        </div>`;
+      return;
+    }
+
+    el.dashUsersList.innerHTML = '';
+    // Display all registered players on the dashboard
+    users.forEach(user => {
+      const card = _createUserCardElement(user);
+      el.dashUsersList.appendChild(card);
+    });
   }
 
   /* ─── Recent TCGs (dashboard) ─── */
@@ -852,6 +1021,20 @@
       const cover = song.CoverUrl || song.cover || "";
       const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
 
+      const modes     = Array.isArray(song.modes) ? song.modes : [];
+      const trimStart = Number(song.trimStart) || 0;
+      const trimEnd   = Number(song.trimEnd)   || 0;
+      const trimLen   = trimEnd > trimStart ? (trimEnd - trimStart) : 0;
+
+      const modeDefs = [
+        { key: 'dance_challenge', label: 'Dance Challenge' },
+        { key: 'mirror_mii',      label: 'Mirror Mii!' },
+        { key: 'kawaii_mode',     label: 'Kawaii Mode' }
+      ];
+
+      const entry = document.createElement('div');
+      entry.className = 'song-entry';
+
       const row = document.createElement('div');
       row.className = 'song-item';
       row.innerHTML = `
@@ -865,11 +1048,18 @@
         <div class="song-meta">
           <span class="song-title-text">${_esc(title)}</span>
           <span class="song-artist-text">${_esc(artist)}</span>
-          <div style="margin-top:0.35rem;">
+          <div style="margin-top:0.35rem;display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;">
             <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Available'}</span>
+            ${modes.length
+              ? modes.map(m => {
+                  const d = modeDefs.find(x => x.key === m);
+                  return `<span class="chip chip--teal">${_esc(d ? d.label : m)}</span>`;
+                }).join('')
+              : `<span class="chip chip--red">No modes</span>`}
+            ${trimLen > 0 ? `<span class="chip chip--teal">Trim ${trimLen.toFixed(1)}s</span>` : ''}
           </div>
         </div>
-        
+
         ${songUrl ? `
           <button class="song-preview-btn" data-action="preview" data-url="${_esc(songUrl)}" title="Preview song">
             <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
@@ -880,12 +1070,201 @@
           ${isPending ? `
             <button class="btn btn-primary btn-sm" data-action="approve" data-id="${songId}">Approve</button>
           ` : ''}
+          <button class="btn btn-secondary btn-sm" data-action="toggle-settings" data-id="${songId}">Edit</button>
           <button class="btn btn-danger btn-sm" data-action="delete" data-id="${songId}">Delete</button>
         </div>
       `;
 
-      el.soundsLibrary.appendChild(row);
+      const panel = document.createElement('div');
+      panel.className = 'song-settings hidden';
+      panel.dataset.settingsFor = songId;
+      panel.innerHTML = `
+        <div class="song-settings-group">
+          <span class="song-settings-label">Available in</span>
+          <div class="song-mode-row">
+            ${modeDefs.map(d => `
+              <label class="song-mode-check">
+                <input type="checkbox" data-mode="${d.key}" ${modes.indexOf(d.key) !== -1 ? 'checked' : ''} />
+                <span>${d.label}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="song-settings-group">
+          <span class="song-settings-label">Trim window &mdash; seconds into the original file</span>
+          <div class="song-trim-bar" data-ready="false" data-duration="0">
+            <div class="song-trim-track">
+              <div class="song-trim-range"></div>
+              <div class="song-trim-playhead"></div>
+              <div class="song-trim-handle" data-handle="start" tabindex="0" role="slider"
+                   aria-label="Trim start" aria-valuemin="0" aria-valuenow="${trimStart}">
+                <span class="song-trim-bubble" data-bubble="start">0:00</span>
+              </div>
+              <div class="song-trim-handle" data-handle="end" tabindex="0" role="slider"
+                   aria-label="Trim end" aria-valuemin="0" aria-valuenow="${trimEnd}">
+                <span class="song-trim-bubble" data-bubble="end">0:00</span>
+              </div>
+            </div>
+            <div class="song-trim-scale">
+              <span>0:00</span>
+              <span class="song-trim-total">loading&hellip;</span>
+            </div>
+          </div>
+
+          <div class="song-trim-row">
+            <label>Start <input type="number" class="song-trim-start" min="0" step="0.1" value="${trimStart}" /></label>
+            <label>End <input type="number" class="song-trim-end" min="0" step="0.1" value="${trimEnd}" /></label>
+            <span class="song-trim-len">${trimLen > 0 ? trimLen.toFixed(1) + 's clip' : 'full track'}</span>
+          </div>
+          <span class="song-settings-hint">End of 0 plays to the natural end of the file. The upload itself is never modified.</span>
+        </div>
+
+        <div class="song-settings-actions">
+          ${songUrl ? `
+            <a class="btn btn-secondary btn-sm" href="${_esc(songUrl)}" download target="_blank" rel="noopener">Download original</a>
+            <button class="btn btn-secondary btn-sm" data-action="preview-trim" data-id="${songId}" data-url="${_esc(songUrl)}">Play trimmed</button>
+          ` : ''}
+          <button class="btn btn-primary btn-sm" data-action="save-settings" data-id="${songId}">Save settings</button>
+        </div>
+      `;
+
+      entry.appendChild(row);
+      entry.appendChild(panel);
+      el.soundsLibrary.appendChild(entry);
     });
+  }
+
+  /* ── Trim bar ──────────────────────────────────────────────────────────
+     Drag two handles over the track length instead of typing seconds. The bar
+     and the number inputs are two views of the same value and stay in sync.
+     Needs the real duration, so it stays disabled until metadata loads. */
+
+  function _fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function _initTrimBar(panel, url) {
+    const bar = panel.querySelector('.song-trim-bar');
+    if (!bar || bar.dataset.bound === '1' || !url) return;
+    bar.dataset.bound = '1';
+
+    const track     = bar.querySelector('.song-trim-track');
+    const range     = bar.querySelector('.song-trim-range');
+    const hStart    = bar.querySelector('[data-handle="start"]');
+    const hEnd      = bar.querySelector('[data-handle="end"]');
+    const totalEl   = bar.querySelector('.song-trim-total');
+    const startIn   = panel.querySelector('.song-trim-start');
+    const endIn     = panel.querySelector('.song-trim-end');
+    const lenEl     = panel.querySelector('.song-trim-len');
+    const bubStart  = bar.querySelector('[data-bubble="start"]');
+    const bubEnd    = bar.querySelector('[data-bubble="end"]');
+    const playhead  = bar.querySelector('.song-trim-playhead');
+
+    let duration = 0;
+
+    const clampVals = () => {
+      let a = Number(startIn.value) || 0;
+      let b = Number(endIn.value)   || 0;          // 0 = natural end
+      a = Math.max(0, Math.min(a, duration));
+      const effEnd = b > 0 ? Math.max(0, Math.min(b, duration)) : duration;
+      return { a, b, effEnd };
+    };
+
+    const paint = () => {
+      const { a, b, effEnd } = clampVals();
+      const pa = duration ? (a / duration) * 100 : 0;
+      const pb = duration ? (effEnd / duration) * 100 : 100;
+      range.style.left  = pa + '%';
+      range.style.width = Math.max(0, pb - pa) + '%';
+      hStart.style.left = pa + '%';
+      hEnd.style.left   = pb + '%';
+      hStart.setAttribute('aria-valuenow', a.toFixed(1));
+      hEnd.setAttribute('aria-valuenow', (b > 0 ? b : effEnd).toFixed(1));
+      const len = effEnd - a;
+      if (lenEl) lenEl.textContent = (b > 0 && len > 0) ? len.toFixed(1) + 's clip' : 'full track';
+      if (bubStart) bubStart.textContent = _fmtTime(a);
+      if (bubEnd)   bubEnd.textContent   = _fmtTime(b > 0 ? b : effEnd);
+    };
+
+    // Metadata gives us the length the handles map onto.
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    probe.addEventListener('loadedmetadata', () => {
+      duration = probe.duration || 0;
+      if (!isFinite(duration) || duration <= 0) {
+        totalEl.textContent = 'unknown length';
+        return;
+      }
+      bar.dataset.duration = String(duration);
+      bar.dataset.ready = 'true';
+      totalEl.textContent = _fmtTime(duration);
+      hStart.setAttribute('aria-valuemax', duration.toFixed(1));
+      hEnd.setAttribute('aria-valuemax', duration.toFixed(1));
+      paint();
+    });
+    probe.addEventListener('error', () => {
+      totalEl.textContent = 'could not read length — type seconds below';
+    });
+    probe.src = url;
+
+    const secondsAt = (clientX) => {
+      const r = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      return ratio * duration;
+    };
+
+    let dragging = null;
+    const onDown = (e) => {
+      if (!duration) return;
+      dragging = e.currentTarget.dataset.handle;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging || !duration) return;
+      const t = secondsAt(e.clientX);
+      if (dragging === 'start') {
+        const { effEnd } = clampVals();
+        startIn.value = Math.min(t, Math.max(0, effEnd - 0.1)).toFixed(1);
+      } else {
+        const a = Number(startIn.value) || 0;
+        // Snapping the end handle to the far right means "natural end" (0).
+        endIn.value = (t >= duration - 0.05) ? 0 : Math.max(t, a + 0.1).toFixed(1);
+      }
+      paint();
+    };
+    const onUp = (e) => {
+      if (!dragging) return;
+      dragging = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+    };
+
+    [hStart, hEnd].forEach(h => {
+      h.addEventListener('pointerdown', onDown);
+      h.addEventListener('pointermove', onMove);
+      h.addEventListener('pointerup', onUp);
+      h.addEventListener('pointercancel', onUp);
+      h.addEventListener('keydown', (e) => {
+        if (!duration) return;
+        const step = e.shiftKey ? 1 : 0.1;
+        const which = h.dataset.handle;
+        const input = which === 'start' ? startIn : endIn;
+        let v = Number(input.value) || 0;
+        if (which === 'end' && v === 0) v = duration;
+        if (e.key === 'ArrowLeft')  { input.value = Math.max(0, v - step).toFixed(1); paint(); e.preventDefault(); }
+        if (e.key === 'ArrowRight') { input.value = Math.min(duration, v + step).toFixed(1); paint(); e.preventDefault(); }
+      });
+    });
+
+    // Typing in the number inputs moves the handles.
+    startIn.addEventListener('input', paint);
+    endIn.addEventListener('input', paint);
+
+    paint();
   }
 
   // Handle Approve/Delete/Preview actions
@@ -894,6 +1273,126 @@
     if (!btn) return;
     const action = btn.dataset.action;
     const songId = btn.dataset.id;
+
+    if (action === 'toggle-settings') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      if (!panel) return;
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) {
+        const song = state.songs.find(s => (s.SongId || s.id) === songId);
+        const url  = song ? (song.SongUrl || song.songLink || song.url || song.musicUrl || "") : "";
+        _initTrimBar(panel, url);
+      }
+      return;
+    }
+
+    if (action === 'preview-trim') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      const url   = btn.dataset.url;
+      if (!url || !panel) return;
+
+      const start = Number(panel.querySelector('.song-trim-start').value) || 0;
+      const end   = Number(panel.querySelector('.song-trim-end').value)   || 0;
+      if (end > 0 && end <= start) {
+        _alert(el.soundsAlert, 'warning', 'Trim end must be greater than trim start.');
+        return;
+      }
+
+      let aud = document.getElementById('song-preview-player');
+      if (!aud) {
+        aud = document.createElement('audio');
+        aud.id = 'song-preview-player';
+        document.body.appendChild(aud);
+      }
+      // Drop any watchers left over from a previous trimmed preview.
+      if (aud._trimWatcher) {
+        aud.removeEventListener('timeupdate', aud._trimWatcher);
+        aud._trimWatcher = null;
+      }
+      if (aud._headWatcher) {
+        aud.removeEventListener('timeupdate', aud._headWatcher);
+        aud._headWatcher = null;
+      }
+
+      aud.src = url;
+      aud.currentTime = start;
+
+      // Drive a playhead across the trim bar for THIS song, and hide it on
+      // every other open panel — only one clip plays at a time.
+      document.querySelectorAll('.song-trim-playhead.active').forEach(p => p.classList.remove('active'));
+      const bar      = panel.querySelector('.song-trim-bar');
+      const duration = bar ? Number(bar.dataset.duration) || 0 : 0;
+      const playhead = panel.querySelector('.song-trim-playhead');
+
+      if (playhead && duration > 0) {
+        playhead.classList.add('active');
+        aud._headWatcher = () => {
+          playhead.style.left = Math.min(100, (aud.currentTime / duration) * 100) + '%';
+        };
+        aud.addEventListener('timeupdate', aud._headWatcher);
+        const hidePlayhead = () => {
+          playhead.classList.remove('active');
+          aud.removeEventListener('timeupdate', aud._headWatcher);
+          aud.removeEventListener('pause', hidePlayhead);
+          aud.removeEventListener('ended', hidePlayhead);
+          aud._headWatcher = null;
+        };
+        aud.addEventListener('pause', hidePlayhead, { once: true });
+        aud.addEventListener('ended', hidePlayhead, { once: true });
+      }
+
+      if (end > start) {
+        aud._trimWatcher = () => {
+          if (aud.currentTime >= end) {
+            aud.pause();
+            aud.removeEventListener('timeupdate', aud._trimWatcher);
+            aud._trimWatcher = null;
+          }
+        };
+        aud.addEventListener('timeupdate', aud._trimWatcher);
+      }
+
+      aud.play()
+        .then(() => _alert(el.soundsAlert, 'info',
+          end > start
+            ? `Playing ${start}s to ${end}s (${(end - start).toFixed(1)}s clip).`
+            : `Playing from ${start}s to the end.`))
+        .catch(() => _alert(el.soundsAlert, 'error', 'Could not play audio. Check the file URL.'));
+      return;
+    }
+
+    if (action === 'save-settings') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      if (!panel) return;
+
+      const modes = [...panel.querySelectorAll('input[data-mode]')]
+        .filter(c => c.checked)
+        .map(c => c.dataset.mode);
+      const start = Number(panel.querySelector('.song-trim-start').value) || 0;
+      const end   = Number(panel.querySelector('.song-trim-end').value)   || 0;
+
+      if (end > 0 && end <= start) {
+        _alert(el.soundsAlert, 'warning', 'Trim end must be greater than trim start.');
+        return;
+      }
+
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Saving...';
+      try {
+        const res = await KangiService.updateSongSettings(songId, modes, start, end);
+        if (res && res.success) {
+          _alert(el.soundsAlert, 'success', '✓ Song settings saved.');
+          await _loadSongsData();
+        } else {
+          _alert(el.soundsAlert, 'error', (res && res.error) || 'Could not save song settings.');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
 
     if (action === 'preview') {
       const url = btn.dataset.url;
@@ -1121,46 +1620,166 @@
   }
 
   /* ================================================================
-     USER LIST — Load & render all players
+     USER LIST — Fetch, Enrich & Render all players from PlayFab
      ================================================================ */
+  /* ================================================================
+     USER LIST — Fetch all players directly from PlayFab via export
+     Two-step flow:
+       1. getAllUsers  → starts export, returns { exportId }
+       2. getExportResult (polled) → returns { status, users } when complete
+     ================================================================ */
+  async function _fetchAndEnrichUsers() {
+    let result;
+    try {
+      result = await KangiService.getFirebaseUsers();
+      console.log('[DWM] getFirebaseUsers response:', result);
+    } catch (err) {
+      console.warn('[DWM] Firebase user fetch failed, attempting PlayFab live registry fallback:', err);
+      try {
+        const pfRes = await KangiService.getAllUsers();
+        if (pfRes && pfRes.status === 'complete' && Array.isArray(pfRes.users)) {
+          result = { source: 'playfab-fallback', users: pfRes.users, isFallback: true };
+        } else {
+          throw err;
+        }
+      } catch (fallbackErr) {
+        const msg = typeof fallbackErr === 'string' ? fallbackErr : (fallbackErr?.message || 'Failed to load players.');
+        throw new Error(msg);
+      }
+    }
+
+    const users = (result && Array.isArray(result.users)) ? result.users : [];
+
+    // Sort by name alphabetically
+    users.sort((a, b) => {
+      const nameA = (_getUserDisplayName(a) || '').toLowerCase();
+      const nameB = (_getUserDisplayName(b) || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    state.allUsers      = users;
+    state.filteredUsers = users;
+
+    // Update settings indicators
+    const csVerEl    = $('settingsCloudscriptVersion');
+    const dsEl       = $('settingsDataSource');
+    const fbStatusEl = $('settingsFirebaseStatus');
+
+    if (csVerEl) {
+      csVerEl.textContent = 'Active';
+      csVerEl.className   = 'badge badge-success';
+    }
+    if (fbStatusEl) {
+      if (result.source === 'firebase') {
+        fbStatusEl.textContent = `● Connected (dance-withmii · ${result.collection || 'users'})`;
+        fbStatusEl.className   = 'badge badge-success';
+      } else {
+        fbStatusEl.textContent = `● PlayFab Fallback`;
+        fbStatusEl.className   = 'badge badge-teal';
+      }
+    }
+    if (dsEl) {
+      if (result.source === 'firebase') {
+        dsEl.textContent = `Firebase (${result.collection || 'users'}) — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+      } else {
+        dsEl.textContent = `PlayFab Live Registry — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+      }
+    }
+
+    return users;
+  }
+
   async function _loadUsers() {
     if (!el.usersList) return;
 
     el.usersList.innerHTML = `
       <div class="empty-state">
         <div class="btn-loader" style="width:22px;height:22px;border-width:3px;"></div>
-        <p>Loading players from PlayFab…</p>
+        <p id="_usersLoadMsg">Fetching player list from Firebase…</p>
       </div>`;
 
     try {
-      const res   = await KangiService.getAllUsers();
-      const users = (res && Array.isArray(res.users)) ? res.users : [];
-
-      state.allUsers     = users;
-      state.filteredUsers = users;
-
-      /* Fetch character data for each user */
-      for (const user of users) {
-        try {
-          const ud = await KangiService.getUserCharacters(user.playFabId);
-          user.unlockedCharacters     = ud.unlockedCharacters || [];
-          user.unlockedCharacterNames = null; // resolved lazily when panel opens
-        } catch (_) {
-          user.unlockedCharacters     = [];
-          user.unlockedCharacterNames = null;
-        }
-      }
-
+      const users = await _fetchAndEnrichUsers();
       _renderUsers(users);
+      _renderStats();
+      _renderDashboardUsers();
 
       if (el.usersAlert) {
-        _alert(el.usersAlert, 'info', `${users.length} player${users.length !== 1 ? 's' : ''} loaded.`);
-        setTimeout(() => el.usersAlert.classList.add('hidden'), 3000);
+        _alert(el.usersAlert, 'info', `${users.length} player${users.length !== 1 ? 's' : ''} loaded and sorted by name.`);
+        setTimeout(() => el.usersAlert?.classList.add('hidden'), 3000);
       }
     } catch (err) {
       el.usersList.innerHTML = `<div class="empty-state"><p style="color:var(--red);">Failed to load users: ${_esc(String(err))}</p></div>`;
       if (el.usersAlert) _alert(el.usersAlert, 'error', typeof err === 'string' ? err : 'Could not load users.');
     }
+  }
+
+  function _getUserDisplayName(user) {
+    if (!user) return 'Unknown';
+    let name = (user.displayName || '').trim();
+    // If displayName is raw hex PlayFabId, 'Unknown', or empty:
+    if (!name || name.toLowerCase() === 'unknown' || name === user.playFabId) {
+      if (user.username) {
+        name = user.username;
+      } else if (user.email) {
+        name = user.email.split('@')[0];
+      } else if (user.playFabId) {
+        name = 'Player ' + user.playFabId.slice(-4);
+      } else {
+        name = 'Player';
+      }
+    }
+    return name;
+  }
+
+  function _createUserCardElement(user) {
+    const card = document.createElement('div');
+    card.className = 'user-card';
+    card.dataset.playfabid = user.playFabId;
+    card.dataset.user = JSON.stringify(user);
+
+    const friendlyName   = _getUserDisplayName(user);
+    const initial        = friendlyName.charAt(0).toUpperCase();
+    const characterCount = (user.unlockedCharacters || []).length;
+
+    card.innerHTML = `
+      <div class="user-card-left">
+        ${user.avatarUrl
+          ? `<img class="user-card-avatar" src="${_esc(user.avatarUrl)}" alt="${_esc(friendlyName)}" />`
+          : `<div class="user-card-avatar user-card-avatar--letter">${_esc(initial)}</div>`
+        }
+      </div>
+      <div class="user-card-info">
+        <div class="user-card-name">
+          ${_esc(friendlyName)}
+          ${user.isAdmin  ? `<span class="chip chip--purple" style="font-size:0.65rem;">Admin</span>`  : ''}
+          ${user.isBanned ? `<span class="chip chip--red"    style="font-size:0.65rem;">Banned</span>` : ''}
+        </div>
+        <div class="user-card-meta">
+          <span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
+            ${user.email ? _esc(user.email) : '<em style="opacity:.5">no email</em>'}
+          </span>
+          <span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+            ${_esc(user.playFabId || 'No ID')}
+          </span>
+          ${user.lastLogin ? `<span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+            Last seen ${new Date(user.lastLogin).toLocaleDateString()}
+          </span>` : ''}
+        </div>
+      </div>
+      <div class="user-card-actions">
+        <button class="btn btn-secondary btn-xs btn-view-more" title="View details via PlayFab API">
+          <span>View More</span>
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;margin-left:3px;">
+            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      </div>`;
+
+    return card;
   }
 
   function _renderUsers(users) {
@@ -1177,60 +1796,14 @@
 
     el.usersList.innerHTML = '';
     users.forEach(user => {
-      const card = document.createElement('div');
-      card.className = 'user-card';
-      card.dataset.playfabid = user.playFabId;
-      card.dataset.user = JSON.stringify(user);
-
-      const initial        = (user.displayName || '?').charAt(0).toUpperCase();
-      const characterCount = (user.unlockedCharacters || []).length;
-
-      card.innerHTML = `
-        <div class="user-card-left">
-          ${user.avatarUrl
-            ? `<img class="user-card-avatar" src="${_esc(user.avatarUrl)}" alt="${_esc(user.displayName)}" />`
-            : `<div class="user-card-avatar user-card-avatar--letter">${_esc(initial)}</div>`
-          }
-        </div>
-        <div class="user-card-info">
-          <div class="user-card-name">
-            ${_esc(user.displayName || 'Unknown')}
-            ${user.isAdmin  ? `<span class="chip chip--purple" style="font-size:0.65rem;">Admin</span>`  : ''}
-            ${user.isBanned ? `<span class="chip chip--red"    style="font-size:0.65rem;">Banned</span>` : ''}
-          </div>
-          <div class="user-card-meta">
-            <span>
-              <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
-              ${user.email ? _esc(user.email) : '<em style="opacity:.5">no email</em>'}
-            </span>
-            <span>
-              <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
-              ${_esc(user.playFabId)}
-            </span>
-            ${user.lastLogin ? `<span>
-              <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
-              Last seen ${new Date(user.lastLogin).toLocaleDateString()}
-            </span>` : ''}
-          </div>
-          <div class="user-card-characters">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/></svg>
-            <span>${characterCount} character${characterCount !== 1 ? 's' : ''} unlocked</span>
-          </div>
-        </div>
-        <div class="user-card-actions">
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;color:var(--text-3);flex-shrink:0;">
-            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
-          </svg>
-        </div>`;
-
+      const card = _createUserCardElement(user);
       el.usersList.appendChild(card);
     });
   }
 
-  /* ── User list click delegation — every card click opens the modal ── */
+  /* ── User list click delegation — clicks on any card (dashboard or list) open modal ── */
   function _bindUserListClicks() {
-    if (!el.usersList) return;
-    el.usersList.addEventListener('click', (e) => {
+    const handleCardClick = (e) => {
       const card = e.target.closest('.user-card');
       if (!card) return;
       try {
@@ -1238,7 +1811,10 @@
       } catch (err) {
         console.error('Failed to parse user data:', err);
       }
-    });
+    };
+
+    if (el.usersList) el.usersList.addEventListener('click', handleCardClick);
+    if (el.dashUsersList) el.dashUsersList.addEventListener('click', handleCardClick);
   }
 
   /* ===================================================================
@@ -1347,6 +1923,42 @@
       });
     });
 
+    /* ── Make Premium ── */
+    el.modalMakePremiumBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, playFabId, displayName } = state.selectedUser;
+      if (!confirm(`Give "${displayName || email}" premium access to upload music?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.makePremium(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isPremium = true;
+          _modalAlert('success', `✓ ${displayName || email} can now upload music.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to grant premium.');
+        }
+      });
+    });
+
+    /* ── Revoke Premium ── */
+    el.modalRevokePremiumBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, playFabId, displayName } = state.selectedUser;
+      if (!confirm(`Remove premium music upload access from "${displayName || email}"?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.revokePremium(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isPremium = false;
+          _modalAlert('success', `✓ Premium removed from ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to revoke premium.');
+        }
+      });
+    });
+
     /* ── Unban ── */
     el.modalUnbanBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
@@ -1447,20 +2059,28 @@
     el.modalMakeAdminBtn.style.display   = (!user.isAdmin && !user.isBanned && user.email) ? '' : 'none';
     el.modalRevokeAdminBtn.style.display = (user.isAdmin  && user.email) ? '' : 'none';
 
+    // Premium toggles — a banned user cannot be granted upload access
+    if (el.modalMakePremiumBtn) {
+      el.modalMakePremiumBtn.style.display   = (!user.isPremium && !user.isBanned && user.email) ? '' : 'none';
+    }
+    if (el.modalRevokePremiumBtn) {
+      el.modalRevokePremiumBtn.style.display = (user.isPremium && user.email) ? '' : 'none';
+    }
+
     // Ban / unban
     const canBan   = !user.isBanned && user.email;
     const canUnban = user.isBanned  && user.email;
 
     // Show/hide the whole ban grid
     const banGrid = el.userModalActionsBar.querySelector('.upf-ban-grid');
-    const banLabel = el.userModalActionsBar.querySelectorAll('.upf-section-label')[1];
+    const banLabel = el.banSectionLabel;
     if (banGrid)  banGrid.style.display  = canBan ? '' : 'none';
     if (banLabel) banLabel.style.display = canBan ? '' : 'none';
 
     el.modalUnbanBtn.style.display = canUnban ? '' : 'none';
   }
 
-  function _showUserDetails(user) {
+  async function _showUserDetails(user) {
     if (!el.userDetailsModal) return;
     state.selectedUser = user;
 
@@ -1468,117 +2088,128 @@
     el.userDetailsBody.innerHTML = `
       <div class="loading-spinner">
         <div class="btn-loader"></div>
-        <p>Loading...</p>
+        <p>Querying PlayFab API for player internal data…</p>
       </div>`;
 
     if (el.userModalActionsBar) el.userModalActionsBar.style.display = 'none';
     if (el.modalActionAlert)    el.modalActionAlert.classList.add('hidden');
 
-    const initial       = (user.displayName || '?').charAt(0).toUpperCase();
-    // Resolve lazily here — NFTs are guaranteed loaded by the time panel opens
+    const friendlyName  = _getUserDisplayName(user);
+    const initial       = friendlyName.charAt(0).toUpperCase();
+
+    // Call PlayFab API on-demand to fetch internal data (unlocked characters, notifications, etc.)
+    let pfDetails = { unlockedCharacters: user.unlockedCharacters || [], notifications: [] };
+    try {
+      if (user.playFabId) {
+        pfDetails = await KangiService.getPlayFabUserDetails(user.playFabId);
+        user.unlockedCharacters = pfDetails.unlockedCharacters || [];
+      }
+    } catch (pfErr) {
+      console.warn('[DWM] PlayFab internal fetch notice:', pfErr);
+    }
+
     const rawIds        = user.unlockedCharacters || [];
     const unlockedNames = rawIds.length > 0 ? _resolveCharacterNames(rawIds) : [];
     const allCharacters = ['Katsumi', 'Kiko', 'Bee', 'Chyna'];
 
-    console.log('[Kangi] Panel open for:', user.displayName, '| rawIds:', rawIds, '| resolved:', unlockedNames);
+    console.log('[Kangi] PlayFab on-demand details for:', friendlyName, '| rawIds:', rawIds, '| resolved:', unlockedNames);
 
-    setTimeout(() => {
-      el.userDetailsBody.innerHTML = `
-        <!-- Hero -->
-        <div class="up-hero">
-          <div class="up-hero-avatar">
-            ${user.avatarUrl ? `<img src="${_esc(user.avatarUrl)}" alt="${_esc(user.displayName)}" />` : initial}
-          </div>
-          <div class="up-hero-info">
-            <h3>${_esc(user.displayName || 'Unknown')}</h3>
-            <span class="up-hero-email">${_esc(user.email || 'No email')}</span>
-            <div class="up-hero-badges">
-              ${user.isAdmin  ? '<span class="chip chip--purple">Admin</span>'  : ''}
-              ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
-            </div>
+    el.userDetailsBody.innerHTML = `
+      <!-- Hero -->
+      <div class="up-hero">
+        <div class="up-hero-avatar">
+          ${user.avatarUrl ? `<img src="${_esc(user.avatarUrl)}" alt="${_esc(friendlyName)}" />` : initial}
+        </div>
+        <div class="up-hero-info">
+          <h3>${_esc(friendlyName)}</h3>
+          <span class="up-hero-email">${_esc(user.email || 'No email')}</span>
+          <div class="up-hero-badges">
+            ${user.isAdmin  ? '<span class="chip chip--purple">Admin</span>'  : ''}
+            ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
+            <span class="chip chip--teal" style="font-size:0.65rem;">PlayFab Connected</span>
           </div>
         </div>
+      </div>
 
-        <!-- Account info -->
-        <div class="up-section">
-          <div class="up-section-title">Account Information</div>
-          <div class="up-info-grid">
-            <div class="up-info-item">
-              <span class="up-info-label">PlayFab ID</span>
-              <span class="up-info-value">${_esc(user.playFabId)}</span>
-            </div>
-            <div class="up-info-item">
-              <span class="up-info-label">Display Name</span>
-              <span class="up-info-value">${_esc(user.displayName || '—')}</span>
-            </div>
-            <div class="up-info-item">
-              <span class="up-info-label">Email</span>
-              <span class="up-info-value">${_esc(user.email || '—')}</span>
-            </div>
-            <div class="up-info-item">
-              <span class="up-info-label">Account Status</span>
-              <span class="up-info-value">${user.isBanned ? '🔴 Banned' : '🟢 Active'}</span>
-            </div>
-            <div class="up-info-item">
-              <span class="up-info-label">Joined</span>
-              <span class="up-info-value">${user.created ? new Date(user.created).toLocaleDateString() : '—'}</span>
-            </div>
-            <div class="up-info-item">
-              <span class="up-info-label">Last Login</span>
-              <span class="up-info-value">${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</span>
-            </div>
+      <!-- Account info -->
+      <div class="up-section">
+        <div class="up-section-title">Account Information (PlayFab &amp; Firebase)</div>
+        <div class="up-info-grid">
+          <div class="up-info-item">
+            <span class="up-info-label">Player Name</span>
+            <span class="up-info-value">${_esc(friendlyName)}</span>
+          </div>
+          <div class="up-info-item">
+            <span class="up-info-label">Email</span>
+            <span class="up-info-value">${_esc(user.email || '—')}</span>
+          </div>
+          <div class="up-info-item">
+            <span class="up-info-label">PlayFab ID</span>
+            <span class="up-info-value">${_esc(user.playFabId || '—')}</span>
+          </div>
+          <div class="up-info-item">
+            <span class="up-info-label">Account Status</span>
+            <span class="up-info-value">${user.isBanned ? '🔴 Banned' : '🟢 Active'}</span>
+          </div>
+          <div class="up-info-item">
+            <span class="up-info-label">Joined</span>
+            <span class="up-info-value">${user.created ? new Date(user.created).toLocaleDateString() : '—'}</span>
+          </div>
+          <div class="up-info-item">
+            <span class="up-info-label">Last Login</span>
+            <span class="up-info-value">${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</span>
           </div>
         </div>
+      </div>
 
-        <!-- Characters -->
-        <div class="up-section">
-          <div class="up-section-title">Unlocked Characters (${rawIds.length} / ${allCharacters.length})</div>
-          <div class="up-chars-grid">
-            ${allCharacters.map(char => {
-              // Check by resolved name OR by raw id containing the character name
-              const isUnlocked = unlockedNames.some(n =>
-                n.toLowerCase() === char.toLowerCase() ||
-                n.toLowerCase().startsWith(char.toLowerCase())
-              ) || rawIds.some(id =>
-                String(id).toLowerCase().includes(char.toLowerCase())
-              );
-              // Find matching NFT for image
-              const matchedNft = isUnlocked
-                ? (state.nfts || []).find(n =>
-                    n.name?.toLowerCase().startsWith(char.toLowerCase())
-                  )
-                : null;
-              return `
-                <div class="up-char-card ${isUnlocked ? 'unlocked' : 'locked'}">
-                  ${matchedNft
-                    ? `<img src="${matchedNft.image}" alt="${_esc(char)}" class="up-char-img" />`
-                    : `<span class="up-char-icon">${isUnlocked ? '🔓' : '🔒'}</span>`
-                  }
-                  <div class="up-char-details">
-                    <span class="up-char-name">${_esc(char)}</span>
-                    ${matchedNft ? `<span class="up-char-nft-name">${_esc(matchedNft.name)}</span>` : ''}
-                    <span class="up-char-badge">${isUnlocked ? 'Unlocked' : 'Locked'}</span>
-                  </div>
-                </div>`;
-            }).join('')}
-          </div>
-        </div>`;
+      <!-- Characters -->
+      <div class="up-section">
+        <div class="up-section-title">Unlocked Characters via PlayFab (${rawIds.length} / ${allCharacters.length})</div>
+        <div class="up-chars-grid">
+          ${allCharacters.map(char => {
+            const isUnlocked = unlockedNames.some(n =>
+              n.toLowerCase() === char.toLowerCase() ||
+              n.toLowerCase().startsWith(char.toLowerCase())
+            ) || rawIds.some(id =>
+              String(id).toLowerCase().includes(char.toLowerCase())
+            );
+            const matchedNft = isUnlocked
+              ? (state.nfts || []).find(n =>
+                  n.name?.toLowerCase().startsWith(char.toLowerCase())
+                )
+              : null;
+            return `
+              <div class="up-char-card ${isUnlocked ? 'unlocked' : 'locked'}">
+                ${matchedNft
+                  ? `<img src="${matchedNft.image}" alt="${_esc(char)}" class="up-char-img" />`
+                  : `<span class="up-char-icon">${isUnlocked ? '🔓' : '🔒'}</span>`
+                }
+                <div class="up-char-details">
+                  <span class="up-char-name">${_esc(char)}</span>
+                  ${matchedNft ? `<span class="up-char-nft-name">${_esc(matchedNft.name)}</span>` : ''}
+                  <span class="up-char-badge">${isUnlocked ? 'Unlocked' : 'Locked'}</span>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
 
-      /* Show action footer */
-      if (el.userModalActionsBar) {
-        el.userModalActionsBar.style.display = '';
-        _updateModalButtons(user);
-      }
+    /* Show action footer */
+    if (el.userModalActionsBar) {
+      el.userModalActionsBar.style.display = '';
+      _updateModalButtons(user);
+    }
 
-      /* Load and render the notification list */
-      _loadUserNotifications(user.playFabId);
-    }, 220);
+    /* Load and render the notification list */
+    if (user.playFabId) {
+      _loadUserNotifications(user.playFabId, pfDetails.notifications);
+    }
   }
 
   /* ================================================================
      USER NOTIFICATIONS — fetch and render inside the details modal
      ================================================================ */
-  async function _loadUserNotifications(playFabId) {
+  async function _loadUserNotifications(playFabId, preloadedNotifs) {
     /* Wait for the modal body to be rendered before injecting the section */
     const container = el.userDetailsBody;
     if (!container) return;
@@ -1598,8 +2229,11 @@
     container.appendChild(section);
 
     try {
-      const res = await KangiService.getNotifications(playFabId);
-      const notifications = (res && Array.isArray(res.notifications)) ? res.notifications : [];
+      let notifications = Array.isArray(preloadedNotifs) ? preloadedNotifs : null;
+      if (!notifications) {
+        const res = await KangiService.getNotifications(playFabId);
+        notifications = (res && Array.isArray(res.notifications)) ? res.notifications : [];
+      }
       const notifList = document.getElementById('up-notif-list');
       if (!notifList) return;
 

@@ -9,6 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://download.playfab.com/PlayFabClientApi.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase App & Database / Firestore SDKs (v10 compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -181,10 +186,47 @@
             </div>
             <div class="stat-body"><strong id="statRedeemed">0</strong><span>Redeemed</span></div>
           </div>
+          <div class="stat-card">
+            <div class="stat-icon stat-icon--pink">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+            </div>
+            <div class="stat-body"><strong id="statUsers">0</strong><span>Registered Players</span></div>
+          </div>
         </div>
-        <div class="dash-grid dash-grid--single">
+
+        <div class="dash-grid">
+          <!-- REGISTERED PLAYERS (LIVE PLAYFAB) -->
           <div class="card">
-            <div class="card-header"><h3>Recent TCGs</h3></div>
+            <div class="card-header card-header--between">
+              <div>
+                <h3>Registered Players</h3>
+                <p>Live players registered in PlayFab</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="document.querySelector('[data-view=users]').click()">
+                Manage Users
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-left:4px;"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+              </button>
+            </div>
+            <div id="dashUsersList" class="card-body">
+              <div class="empty-state">
+                <div class="btn-loader" style="width:22px;height:22px;border-width:3px;"></div>
+                <p>Loading registered players from PlayFab…</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- RECENT TCGS -->
+          <div class="card">
+            <div class="card-header card-header--between">
+              <div>
+                <h3>Recent TCGs</h3>
+                <p>Latest batches &amp; QR distribution</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="document.querySelector('[data-view=manage]').click()">
+                Manage QRs
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-left:4px;"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+              </button>
+            </div>
             <div id="recentNftsList" class="card-body">
               <div class="empty-state">
                 <svg viewBox="0 0 40 40" fill="none"><rect x="5" y="5" width="30" height="30" rx="6" stroke="currentColor" stroke-width="2"/><path d="M13 27V13h5l7 9V13h5v14h-5L18 18v9h-5Z" fill="currentColor"/></svg>
@@ -361,11 +403,11 @@
                   </svg>
                 </button>
               </div>
-              <button id="loadUsersBtn" class="btn btn-secondary btn-sm">
+              <button id="loadUsersBtn" class="btn btn-primary btn-sm" title="Refresh players directly from PlayFab">
                 <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;">
-                  <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/>
+                  <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
                 </svg>
-                Load Users
+                Refresh Players
               </button>
             </div>
           </div>
@@ -436,8 +478,20 @@
                   <span class="badge badge-purple">Administrator</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Backend Engine</span>
-                  <span class="detail-value">PlayFab CloudScript</span>
+                  <span class="detail-label">Frontend Version</span>
+                  <span class="badge badge-purple" id="settingsFrontendVersion">v2.5.0</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">PlayFab CloudScript Version</span>
+                  <span class="badge badge-teal" id="settingsCloudscriptVersion">Checking live revision...</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Data Fetch Source</span>
+                  <span class="detail-value" id="settingsDataSource">Loading...</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Firebase Connection</span>
+                  <span class="badge badge-success" id="settingsFirebaseStatus">● Connected (dance-withmii)</span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">PlayFab Title ID</span>
@@ -447,6 +501,87 @@
                   <span class="detail-label">Session Status</span>
                   <span class="badge badge-success">● Connected &amp; Active</span>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Firebase card: auto-hidden once a session connects (see app.js _onLoginSuccess).
+               Left visible by default so a mismatched admin always has a way in. -->
+          <div class="card settings-card" id="firebaseSettingsCard">
+            <div class="card-header">
+              <h3 class="card-title">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/></svg>
+                Firebase Player List Source
+              </h3>
+            </div>
+            <div class="settings-card-body">
+              <p class="setting-desc" style="margin-bottom: 1rem; color: var(--text-2);">
+                Admin fetches player documents from Firebase and renders them sorted by name. Clicking <strong>View More</strong> queries the PlayFab API on-demand for internal profile and character data.
+              </p>
+              
+              <div id="firebaseConfigAlert" class="alert hidden" style="margin-bottom: 1rem;"></div>
+
+              <div class="form-row" style="margin-bottom: 0.85rem;">
+                <div class="field-group" style="flex:1;">
+                  <label for="fbDatabaseType">Database Type</label>
+                  <select id="fbDatabaseType" class="input-select" style="width:100%;">
+                    <option value="firestore">Cloud Firestore (Default)</option>
+                    <option value="rtdb">Realtime Database</option>
+                  </select>
+                </div>
+                <div class="field-group" style="flex:1;">
+                  <label for="fbCollectionName">Collection / Node Path</label>
+                  <input id="fbCollectionName" type="text" placeholder="users" value="users" />
+                </div>
+              </div>
+
+              <div class="field-group" style="margin-bottom: 0.85rem;">
+                <label for="fbProjectId">Project ID</label>
+                <input id="fbProjectId" type="text" placeholder="e.g. dancewithmii-app" />
+              </div>
+
+              <div class="field-group" style="margin-bottom: 0.85rem;">
+                <label for="fbApiKey">API Key</label>
+                <input id="fbApiKey" type="text" placeholder="AIzaSy..." />
+              </div>
+
+              <div class="field-group" style="margin-bottom: 0.85rem;">
+                <label for="fbAuthDomain">Auth Domain <span style="font-size:0.75rem;opacity:0.7;">(optional)</span></label>
+                <input id="fbAuthDomain" type="text" placeholder="project-id.firebaseapp.com" />
+              </div>
+
+              <div class="field-group" style="margin-bottom: 1rem;">
+                <label for="fbDatabaseUrl">Database URL <span style="font-size:0.75rem;opacity:0.7;">(for Realtime DB)</span></label>
+                <input id="fbDatabaseUrl" type="text" placeholder="https://project-id-default-rtdb.firebaseio.com" />
+              </div>
+
+              <div class="field-group" style="margin-bottom: 0.85rem;">
+                <label for="fbAdminEmail">Admin Sign-In Email</label>
+                <input id="fbAdminEmail" type="email" placeholder="admin@yourdomain.com" autocomplete="username" />
+              </div>
+
+              <div class="field-group" style="margin-bottom: 1rem;">
+                <label for="fbAdminPassword">Admin Sign-In Password</label>
+                <input id="fbAdminPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
+                <span style="font-size:0.75rem;opacity:0.7;display:block;margin-top:0.35rem;">
+                  Firestore rules require a signed-in admin to read player records. Stored in this browser only.
+                </span>
+              </div>
+
+              <div class="field-group" style="margin-bottom: 1.25rem;">
+                <label for="fbJsonConfig">Or Paste Firebase Config JSON</label>
+                <textarea id="fbJsonConfig" rows="3" placeholder='{"apiKey": "...", "projectId": "...", "databaseURL": "..."}' style="width:100%; font-family: monospace; font-size: 0.8rem; resize: vertical;"></textarea>
+              </div>
+
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <button id="saveFirebaseBtn" class="btn btn-primary btn-sm">
+                  <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                  Save Firebase Config
+                </button>
+                <button id="testFirebaseBtn" class="btn btn-secondary btn-sm">
+                  <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+                  Test Connection &amp; Sync
+                </button>
               </div>
             </div>
           </div>
@@ -536,8 +671,21 @@
         </button>
       </div>
 
+      <!-- Premium (music upload access) -->
+      <div class="upf-section-label" style="margin-top:1rem;">Music Upload Access</div>
+      <div class="upf-row">
+        <button class="upf-btn upf-btn--green" id="modalMakePremiumBtn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.958a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.367 2.446a1 1 0 00-.363 1.118l1.286 3.958c.3.921-.755 1.688-1.539 1.118l-3.366-2.446a1 1 0 00-1.176 0l-3.366 2.446c-.784.57-1.838-.197-1.539-1.118l1.286-3.958a1 1 0 00-.363-1.118L2.063 9.385c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.951-.69l1.285-3.958z"/></svg>
+          <span>Make Premium</span>
+        </button>
+        <button class="upf-btn upf-btn--ghost" id="modalRevokePremiumBtn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>
+          <span>Revoke Premium</span>
+        </button>
+      </div>
+
       <!-- Ban options -->
-      <div class="upf-section-label" style="margin-top:1rem;">Ban User</div>
+      <div class="upf-section-label" id="banSectionLabel" style="margin-top:1rem;">Ban User</div>
       <div class="upf-ban-grid">
         <button class="upf-ban-card" id="modalBanBtn" data-modal-ban="3">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>

@@ -52,8 +52,36 @@ handlers.videoAppWorkflow = function (args, context) {
 
     // C. SUBMIT NEW UPLOADED SONG (Global Master Catalog)
     if (action === "submitSong" || action === "submit") {
+        // Premium gate, enforced server-side. The Unity popup is the friendly
+        // half of this check; a modified client can skip that, not this one.
+        var uploaderIsAllowed = false;
+        try {
+            var upData = server.GetUserData({ PlayFabId: currentPlayerId, Keys: ["IsPremium", "IsAdmin"] });
+            if (upData && upData.Data) {
+                if (upData.Data.IsPremium && upData.Data.IsPremium.Value === "true") uploaderIsAllowed = true;
+                if (upData.Data.IsAdmin   && upData.Data.IsAdmin.Value   === "true") uploaderIsAllowed = true;
+            }
+        } catch (ePrem) {}
+
+        if (!uploaderIsAllowed) {
+            return {
+                success:      false,
+                errorCode:    "NOT_PREMIUM",
+                error:        "This feature is only for Premium users and admin must approve the music before the music becomes available."
+            };
+        }
+
         var newSongObj = args.songData;
         newSongObj.isPending = true;
+
+        // Mode defaults: every song is playable in Mirror Mii and Kawaii Mode.
+        // Dance Challenge is opt-in, because it needs a trimmed countdown window.
+        if (!newSongObj.modes || !newSongObj.modes.length) {
+            newSongObj.modes = ["mirror_mii", "kawaii_mode"];
+        }
+        // 0 / 0 means "play the whole file" until an admin trims it.
+        if (typeof newSongObj.trimStart !== "number") newSongObj.trimStart = 0;
+        if (typeof newSongObj.trimEnd   !== "number") newSongObj.trimEnd   = 0;
 
         // Always stamp the uploader's PlayFab ID server-side — never trust the client
         newSongObj.uploaderId = currentPlayerId;
@@ -223,6 +251,98 @@ handlers.videoAppWorkflow = function (args, context) {
     var adminParams = args.adminData || {};
 
     // F. APPROVE A PENDING SONG + send notification
+    // ====================================================================================
+    // UPDATE SONG SETTINGS — which game modes a song appears in, and its trim window.
+    //
+    // Trim is stored, never applied to the file. The uploaded audio is left
+    // untouched and the client plays only [trimStart, trimEnd). That keeps the
+    // edit reversible, avoids re-encoding, and costs no storage.
+    // ====================================================================================
+    if (action === "updateSongSettings") {
+        var uParams   = adminParams || args;
+        var uSongId   = uParams.songId;
+        if (!uSongId) return { success: false, error: "songId is required." };
+
+        var ALLOWED_MODES = ["dance_challenge", "mirror_mii", "kawaii_mode"];
+
+        // Keep only recognised mode keys, and drop duplicates.
+        var cleanModes = [];
+        if (uParams.modes && uParams.modes.length) {
+            for (var mi = 0; mi < uParams.modes.length; mi++) {
+                var mk = String(uParams.modes[mi]);
+                var known = false;
+                for (var ai = 0; ai < ALLOWED_MODES.length; ai++) {
+                    if (ALLOWED_MODES[ai] === mk) { known = true; break; }
+                }
+                var dupe = false;
+                for (var ci = 0; ci < cleanModes.length; ci++) {
+                    if (cleanModes[ci] === mk) { dupe = true; break; }
+                }
+                if (known && !dupe) cleanModes.push(mk);
+            }
+        }
+
+        var tStart = Number(uParams.trimStart);
+        var tEnd   = Number(uParams.trimEnd);
+        if (isNaN(tStart) || tStart < 0) tStart = 0;
+        // 0 means "play to the natural end of the file".
+        if (isNaN(tEnd) || tEnd < 0) tEnd = 0;
+        if (tEnd > 0 && tEnd <= tStart) {
+            return { success: false, error: "Trim end must be greater than trim start." };
+        }
+
+        var uResp = server.GetTitleInternalData({ Keys: [SONGS_DATABASE_KEY] });
+        if (!uResp.Data || !uResp.Data[SONGS_DATABASE_KEY]) {
+            return { success: false, error: "Songs catalog empty" };
+        }
+
+        var uWrapper = JSON.parse(uResp.Data[SONGS_DATABASE_KEY]);
+        var uSongs = [];
+        if (Array.isArray(uWrapper)) {
+            uSongs = uWrapper;
+        } else if (uWrapper.songs) {
+            uSongs = uWrapper.songs;
+        } else {
+            uSongs = [];
+            if (uWrapper.approvedSongs) uSongs = uSongs.concat(uWrapper.approvedSongs);
+            if (uWrapper.pendingSongs)  uSongs = uSongs.concat(uWrapper.pendingSongs);
+        }
+
+        var uFound = false;
+        var uApproved = [];
+        var uPending  = [];
+
+        for (var ui = 0; ui < uSongs.length; ui++) {
+            if (uSongs[ui].SongId === uSongId) {
+                uSongs[ui].modes     = cleanModes;
+                uSongs[ui].trimStart = tStart;
+                uSongs[ui].trimEnd   = tEnd;
+                uFound = true;
+            }
+            if (uSongs[ui].isPending === true || uSongs[ui].isPending === "true") {
+                uPending.push(uSongs[ui]);
+            } else {
+                uApproved.push(uSongs[ui]);
+            }
+        }
+
+        if (!uFound) return { success: false, error: "Song not found: " + uSongId };
+
+        server.SetTitleInternalData({
+            Key:   SONGS_DATABASE_KEY,
+            Value: JSON.stringify({ songs: uSongs, approvedSongs: uApproved, pendingSongs: uPending })
+        });
+
+        return {
+            success:   true,
+            message:   "Song settings updated.",
+            songId:    uSongId,
+            modes:     cleanModes,
+            trimStart: tStart,
+            trimEnd:   tEnd
+        };
+    }
+
     if (action === "approveSong") {
         var targetSongId = adminParams.songId;
         log.info("=== APPROVE SONG START ===");
@@ -1177,90 +1297,538 @@ handlers.testNotificationSystem = function(args, context) {
 };
 
 // ====================================================================================
-// ADMIN USER MANAGEMENT WORKFLOW
-// Handles granting admin privileges to a user by email address.
-// Copy and Paste this entire file into your PlayFab CloudScript Revision Editor.
+// ====================================================================================
+// ADMIN USER MANAGEMENT WORKFLOW — Direct PlayFab Player Retrieval (v3.0.0)
+// Completely decoupled from Title Internal Data / GlobalAppUsersRegistry.
+// Queries PlayFab real player accounts directly with pagination & admin security.
 // ====================================================================================
 
+// ====================================================================================
+// FIREBASE REST SYNC HELPER (Cloud Firestore & Realtime Database)
+// Automatically creates or updates the player's document in Firebase from CloudScript.
+// ====================================================================================
+/* Firebase sync service credentials.
+
+   These are intentionally BLANK in the repo -- github.com/MA-Ciel/KangiAdminApp
+   is public, and a password committed here would be world-readable forever, in
+   history, even after a later removal.
+
+   Fill them in on the PlayFab CloudScript revision only. The revision that runs
+   is not the file in git, so the running code can carry the secret while the
+   repo does not. CloudScript source is never exposed to game clients.
+
+   If Title Internal Data is set later, it is used only when these are blank. */
+var FIREBASE_SVC_EMAIL    = "ak25117@gmail.com";
+var FIREBASE_SVC_PASSWORD = "Kashan@1";
+
+// Cached for the lifetime of a single CloudScript execution so that a batch
+// sync signs in once rather than once per player.
+var _fbTokenCache = null;
+
+/* Exchange the dedicated service identity's credentials for a Firebase ID
+   token. The credentials live in Title *Internal* Data, which only server-side
+   CloudScript can read -- they are never exposed to a game client.
+
+   Note: this is deliberately NOT a Google service-account JWT. Minting one
+   requires RS256-signing a 2048-bit assertion, and the Legacy CloudScript
+   sandbox exposes no crypto primitives (no require, no Buffer, no subtle) and
+   caps execution time. See the security rules for how this uid is scoped. */
+function _firebaseGetIdToken(apiKey, email, password) {
+    if (_fbTokenCache) return { success: true, idToken: _fbTokenCache };
+
+    if (!email || !password) {
+        return {
+            success: false,
+            error: "Firebase service credentials missing. Set Firebase_SvcEmail and " +
+                   "Firebase_SvcPassword in Title Internal Data."
+        };
+    }
+
+    var signInUrl = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" +
+                    encodeURIComponent(apiKey);
+    var signInBody = JSON.stringify({ email: email, password: password, returnSecureToken: true });
+
+    var raw;
+    try {
+        raw = http.request(signInUrl, "post", signInBody, "application/json", null);
+    } catch (eSignIn) {
+        return { success: false, error: "Firebase sign-in request failed: " + (eSignIn.message || String(eSignIn)) };
+    }
+
+    var parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (eParse) {
+        return { success: false, error: "Firebase sign-in returned unparseable body: " + String(raw).slice(0, 200) };
+    }
+
+    if (!parsed || !parsed.idToken) {
+        var reason = (parsed && parsed.error && parsed.error.message) ? parsed.error.message : "no idToken in response";
+        return { success: false, error: "Firebase sign-in rejected: " + reason };
+    }
+
+    _fbTokenCache = parsed.idToken;
+    return { success: true, idToken: parsed.idToken };
+}
+
+function _syncPlayerToFirebase(playFabId, displayName, email, avatarUrl, additionalFields) {
+    if (!playFabId) return { success: false, error: "No playFabId provided" };
+
+    try {
+        // Read Title Internal Data settings for Firebase (or fallback to defaults)
+        var titleData = server.GetTitleInternalData({
+            Keys: ["Firebase_ProjectId", "Firebase_ApiKey", "Firebase_Collection",
+                   "Firebase_DbType", "Firebase_DbUrl", "Firebase_SvcEmail", "Firebase_SvcPassword"]
+        });
+        var td = (titleData && titleData.Data) ? titleData.Data : {};
+
+        var projectId      = td["Firebase_ProjectId"]  || "dance-withmii";
+        var apiKey         = td["Firebase_ApiKey"]     || "AIzaSyBArP6gJqVhhdDTZ2XLINBYIvPMmON7EFM";
+        var collectionName = td["Firebase_Collection"] || "users";
+        var dbType         = td["Firebase_DbType"]     || "firestore"; // 'firestore' or 'rtdb'
+        var dbUrl          = td["Firebase_DbUrl"]      || "";
+        // Hardcoded revision values win; Title Internal Data is the fallback.
+        var svcEmail       = FIREBASE_SVC_EMAIL    || td["Firebase_SvcEmail"]    || "";
+        var svcPassword    = FIREBASE_SVC_PASSWORD || td["Firebase_SvcPassword"] || "";
+
+        // An API key is not authentication. Every write below carries a real
+        // Firebase ID token so the security rules can scope it to one uid.
+        var auth = _firebaseGetIdToken(apiKey, svcEmail, svcPassword);
+        if (!auth.success) {
+            log.error("[FirebaseSync] Auth failed for player " + playFabId + ": " + auth.error);
+            return { success: false, error: auth.error };
+        }
+        var authHeaders = { "Authorization": "Bearer " + auth.idToken };
+
+        var nowIso = new Date().toISOString();
+        var safeName = displayName || "";
+        var safeEmail = email || "";
+        var safeAvatar = avatarUrl || "";
+
+        // If displayName or email are empty, try fetching from PlayFab Account Info
+        if (!safeName || !safeEmail) {
+            try {
+                var accInfo = server.GetUserAccountInfo({ PlayFabId: playFabId });
+                if (accInfo && accInfo.UserInfo) {
+                    if (!safeName && accInfo.UserInfo.TitleInfo && accInfo.UserInfo.TitleInfo.DisplayName) {
+                        safeName = accInfo.UserInfo.TitleInfo.DisplayName;
+                    }
+                    if (!safeName && accInfo.UserInfo.Username) {
+                        safeName = accInfo.UserInfo.Username;
+                    }
+                    if (!safeEmail && accInfo.UserInfo.PrivateInfo && accInfo.UserInfo.PrivateInfo.Email) {
+                        safeEmail = accInfo.UserInfo.PrivateInfo.Email;
+                    }
+                }
+            } catch (eAcc) {}
+        }
+
+        if (dbType === "rtdb") {
+            // Realtime Database REST API: PATCH /users/{playFabId}.json
+            // RTDB takes the ID token in ?auth= (it accepts Firebase ID tokens there).
+            var rtdbUrl = dbUrl || ("https://" + projectId + "-default-rtdb.firebaseio.com");
+            var rtdbEndpoint = rtdbUrl + "/" + encodeURIComponent(collectionName) + "/" +
+                               encodeURIComponent(playFabId) + ".json?auth=" + encodeURIComponent(auth.idToken);
+
+            var rtdbPayload = {
+                playFabId:   playFabId,
+                displayName: safeName || ("Player " + String(playFabId).slice(-4)),
+                email:       safeEmail,
+                avatarUrl:   safeAvatar,
+                updatedAt:   nowIso
+            };
+            if (additionalFields && typeof additionalFields === "object") {
+                for (var k in additionalFields) {
+                    if (additionalFields.hasOwnProperty(k)) rtdbPayload[k] = additionalFields[k];
+                }
+            }
+
+            var rtdbRes;
+            try {
+                rtdbRes = http.request(rtdbEndpoint, "patch", JSON.stringify(rtdbPayload), "application/json", null);
+            } catch (eRtdb) {
+                log.error("[FirebaseSync] RTDB write failed for " + playFabId + ": " + (eRtdb.message || String(eRtdb)));
+                return { success: false, dbType: "rtdb", error: "RTDB write failed: " + (eRtdb.message || String(eRtdb)) };
+            }
+
+            // A successful PATCH echoes the written object back. Anything else
+            // (notably an {"error": ...} body) means the write did not land.
+            var rtdbParsed = null;
+            try { rtdbParsed = JSON.parse(rtdbRes); } catch (eRp) {}
+            if (rtdbParsed && rtdbParsed.error) {
+                log.error("[FirebaseSync] RTDB rejected write for " + playFabId + ": " + rtdbParsed.error);
+                return { success: false, dbType: "rtdb", error: "RTDB rejected write: " + rtdbParsed.error };
+            }
+
+            return { success: true, dbType: "rtdb", response: rtdbRes };
+        } else {
+            // Cloud Firestore REST API: PATCH /projects/{projectId}/databases/(default)/documents/{collection}/{playFabId}
+            var firestoreEndpoint = "https://firestore.googleapis.com/v1/projects/" + encodeURIComponent(projectId) +
+                                    "/databases/(default)/documents/" + encodeURIComponent(collectionName) + "/" + encodeURIComponent(playFabId);
+
+            var fields = {
+                playFabId:   { stringValue: String(playFabId) },
+                displayName: { stringValue: String(safeName || ("Player " + String(playFabId).slice(-4))) },
+                email:       { stringValue: String(safeEmail) },
+                avatarUrl:   { stringValue: String(safeAvatar) },
+                lastLogin:   { stringValue: nowIso }
+            };
+            if (additionalFields && additionalFields.isNewRegistration) {
+                fields.createdAt = { stringValue: nowIso };
+            }
+
+            // Without an explicit updateMask a PATCH replaces the whole document,
+            // which would wipe createdAt on every subsequent login.
+            var maskQuery = "";
+            for (var f in fields) {
+                if (fields.hasOwnProperty(f)) {
+                    maskQuery += (maskQuery ? "&" : "?") + "updateMask.fieldPaths=" + encodeURIComponent(f);
+                }
+            }
+            firestoreEndpoint += maskQuery;
+
+            var firestorePayload = { fields: fields };
+            var fsRes;
+            try {
+                fsRes = http.request(firestoreEndpoint, "patch", JSON.stringify(firestorePayload), "application/json", authHeaders);
+            } catch (eFs) {
+                log.error("[FirebaseSync] Firestore write failed for " + playFabId + ": " + (eFs.message || String(eFs)));
+                return { success: false, dbType: "firestore", error: "Firestore write failed: " + (eFs.message || String(eFs)) };
+            }
+
+            // Firestore echoes the written document, including its resource name.
+            // No name means the write did not land, whatever the status code was.
+            var fsParsed = null;
+            try { fsParsed = JSON.parse(fsRes); } catch (eFp) {}
+            if (!fsParsed || !fsParsed.name) {
+                var fsReason = (fsParsed && fsParsed.error && fsParsed.error.message)
+                    ? fsParsed.error.message
+                    : String(fsRes).slice(0, 200);
+                log.error("[FirebaseSync] Firestore rejected write for " + playFabId + ": " + fsReason);
+                return { success: false, dbType: "firestore", error: "Firestore rejected write: " + fsReason };
+            }
+
+            return { success: true, dbType: "firestore", document: fsParsed.name };
+        }
+    } catch (err) {
+        log.error("[FirebaseSync] Error syncing player " + playFabId + ": " + (err.message || JSON.stringify(err)));
+        return { success: false, error: err.message || String(err) };
+    }
+}
+
 handlers.adminUserWorkflow = function (args, context) {
+    var CLOUDSCRIPT_VERSION = "3.1.0-firebase-sync";
     var action = args.action;
 
-    // ── Shared registry key ──
-    var USERS_REGISTRY_KEY = "GlobalAppUsersRegistry";
-
-    // ── Helper: read registry ──
-    function _readRegistry() {
-        var raw = server.GetTitleInternalData({ Keys: [USERS_REGISTRY_KEY] });
-        if (raw.Data && raw.Data[USERS_REGISTRY_KEY]) {
-            try { return JSON.parse(raw.Data[USERS_REGISTRY_KEY]); } catch (e) {}
+    // ── 1. Admin Authentication Check ──
+    var callerId = currentPlayerId;
+    var isCallerAdmin = false;
+    try {
+        var callerUd = server.GetUserData({ PlayFabId: callerId, Keys: ["IsAdmin"] });
+        if (callerUd && callerUd.Data && callerUd.Data.IsAdmin && callerUd.Data.IsAdmin.Value === "true") {
+            isCallerAdmin = true;
         }
-        return [];
-    }
+    } catch (e) {}
 
-    // ── Helper: save registry ──
-    function _saveRegistry(list) {
-        server.SetTitleInternalData({
-            Key:   USERS_REGISTRY_KEY,
-            Value: JSON.stringify(list)
-        });
-    }
-
-    // ── Helper: upsert one user entry into registry ──
-    function _upsertRegistry(entry) {
-        var list  = _readRegistry();
-        var found = false;
-        for (var i = 0; i < list.length; i++) {
-            if (list[i].playFabId === entry.playFabId) {
-                // merge — keep existing fields, overwrite supplied ones
-                for (var k in entry) { list[i][k] = entry[k]; }
-                found = true;
-                break;
-            }
-        }
-        if (!found) list.unshift(entry);
-        _saveRegistry(list);
+    // Allow registerUser without admin privileges (called on player login/registration)
+    if (action !== "registerUser" && !isCallerAdmin) {
+        return { success: false, error: "Unauthorized: Administrator privileges required." };
     }
 
     // ====================================================================================
-    // A. REGISTER USER — Called on every login to keep the registry up-to-date
+    // A. REGISTER USER — Records the player into a LIVE PlayFab registry and syncs to Firebase
+    //    Called by game client on registration/login or automatically triggered.
     // ====================================================================================
     if (action === "registerUser") {
-        var callerPlayFabId  = currentPlayerId;           // built-in CloudScript var
-        var callerEmail      = args.email      || "";
-        var callerName       = args.displayName || "";
-        var callerAvatar     = args.avatarUrl  || "";
+        var REGISTRY_GROUP_ID = "AllRegisteredPlayers";
+        var isNewReg = false;
 
-        // Read IsAdmin / IsBanned from the caller's own player data
-        var selfData = {};
+        // 1. Save/refresh basic profile fields on the player's own UserData
         try {
-            var ud = server.GetUserData({ PlayFabId: callerPlayFabId, Keys: ["IsAdmin", "IsBanned"] });
-            selfData = ud.Data || {};
-        } catch (e) {}
+            var existing = server.GetUserData({ PlayFabId: callerId, Keys: ["RegisteredAt"] });
+            var alreadyRegistered = !!(existing && existing.Data && existing.Data.RegisteredAt);
+            isNewReg = !alreadyRegistered;
 
-        var entry = {
-            playFabId:   callerPlayFabId,
-            displayName: callerName,
-            email:       callerEmail,
-            avatarUrl:   callerAvatar,
-            isAdmin:     (selfData.IsAdmin  && selfData.IsAdmin.Value  === "true"),
-            isBanned:    (selfData.IsBanned && selfData.IsBanned.Value === "true"),
-            lastLogin:   new Date().toISOString()
+            var dataToSet = {
+                DisplayName: args.displayName || "",
+                Email:       args.email       || "",
+                AvatarUrl:   args.avatarUrl    || ""
+            };
+            if (!alreadyRegistered) {
+                dataToSet.RegisteredAt = new Date().toISOString();
+            }
+            server.UpdateUserData({ PlayFabId: callerId, Data: dataToSet, Permission: "Private" });
+        } catch (eUd) {
+            log.error("registerUser: failed to write UserData for " + callerId + ": " + eUd);
+        }
+
+        // 2. Add the player to the live registry group
+        try {
+            server.AddSharedGroupMembers({ SharedGroupId: REGISTRY_GROUP_ID, PlayFabIds: [callerId] });
+        } catch (eGroup) {
+            try {
+                server.CreateSharedGroup({ SharedGroupId: REGISTRY_GROUP_ID });
+                server.AddSharedGroupMembers({ SharedGroupId: REGISTRY_GROUP_ID, PlayFabIds: [callerId] });
+            } catch (eCreate) {
+                log.error("registerUser: failed to add " + callerId + " to registry group: " + eCreate);
+            }
+        }
+
+        // 3. Automatic Firebase Document Sync via REST API
+        var fbSyncResult = _syncPlayerToFirebase(callerId, args.displayName, args.email, args.avatarUrl, { isNewRegistration: isNewReg });
+
+        return { 
+            success: true, 
+            version: CLOUDSCRIPT_VERSION, 
+            message: "Player registered in PlayFab and synced to Firebase.",
+            firebaseSync: fbSyncResult
         };
-
-        _upsertRegistry(entry);
-        return { success: true, message: "User registered in registry." };
     }
 
     // ====================================================================================
-    // B. GET ALL USERS — Return the full registry list
+    // B. GET ALL USERS — LIVE read from the "AllRegisteredPlayers" Shared Group.
+    //
+    //    Replaces the old Segment Export flow (ExportPlayersInSegment / GetSegmentExport),
+    //    which snapshots segment membership and can lag behind brand-new registrations.
+    //    Membership in the Shared Group is written synchronously by "registerUser", so a
+    //    player who just registered shows up here immediately — no polling, no wait.
+    //
+    //    Returns status:"complete" directly (single round trip, no exportId/poll step).
     // ====================================================================================
     if (action === "getAllUsers") {
-        var users = _readRegistry();
-        return { success: true, users: users, total: users.length };
+        var REGISTRY_GROUP_ID = "AllRegisteredPlayers";
+        var rawPlayers = [];
+
+        var memberIds = [];
+        try {
+            var sgData = server.GetSharedGroupData({ SharedGroupId: REGISTRY_GROUP_ID, GetMembers: true });
+            if (sgData && sgData.Members) {
+                for (var mi = 0; mi < sgData.Members.length; mi++) {
+                    memberIds.push(sgData.Members[mi].PlayFabId);
+                }
+            }
+        } catch (eGroup) {
+            // Group not created yet (no one has registered) — treat as empty list, not an error.
+            log.info("getAllUsers: registry group not found or empty: " + eGroup);
+        }
+
+        log.info("getAllUsers: " + memberIds.length + " player(s) in live registry");
+
+        for (var pi = 0; pi < memberIds.length; pi++) {
+            var pfId = memberIds[pi];
+            try {
+                var ud = server.GetUserData({
+                    PlayFabId: pfId,
+                    Keys: ["DisplayName", "Email", "AvatarUrl", "RegisteredAt", "IsAdmin", "IsBanned", "IsPremium"]
+                });
+                var d = (ud && ud.Data) ? ud.Data : {};
+
+                var dName = d.DisplayName ? d.DisplayName.Value : "";
+                var dEmail = d.Email ? d.Email.Value : "";
+                if (!dName && dEmail) dName = dEmail.split("@")[0];
+                if (!dName) dName = "Player " + pfId.slice(-4);
+
+                rawPlayers.push({
+                    playFabId:   pfId,
+                    displayName: dName,
+                    email:       dEmail,
+                    avatarUrl:   d.AvatarUrl ? d.AvatarUrl.Value : "",
+                    isAdmin:     !!(d.IsAdmin  && d.IsAdmin.Value  === "true"),
+                    isBanned:    !!(d.IsBanned && d.IsBanned.Value === "true"),
+                    isPremium:   !!(d.IsPremium && d.IsPremium.Value === "true"),
+                    created:     d.RegisteredAt ? d.RegisteredAt.Value : "",
+                    lastLogin:   ""
+                });
+            } catch (eUser) {
+                log.error("getAllUsers: failed to read UserData for " + pfId + ": " + eUser);
+                // Skip this player rather than failing the whole list
+            }
+        }
+
+        log.info("getAllUsers: returning " + rawPlayers.length + " players from live registry");
+        return {
+            success: true,
+            status:  "complete",
+            users:   rawPlayers,
+            total:   rawPlayers.length,
+            source:  "shared_group_live",
+            version: CLOUDSCRIPT_VERSION
+        };
     }
 
     // ====================================================================================
-    // C. MAKE ADMIN — accepts email OR playFabId, sets IsAdmin = "true"
+    // B2. GET EXPORT RESULT — LEGACY. getAllUsers no longer starts an export (it now
+    //     returns status:"complete" immediately from the live registry above), so the
+    //     client never calls this anymore. Left in place only for backward compatibility
+    //     in case anything old still calls it directly.
+    //     Returns { status: "pending" } if still processing, or
+    //             { status: "complete", users: [...] } when done.
+    // ====================================================================================
+    if (action === "getExportResult") {
+        var exportId  = args.exportId  || "";
+        var segmentId = (args.segmentId && args.segmentId.trim()) ? args.segmentId.trim() : "39DB56B86E752167";
+
+        if (!exportId) {
+            return { success: false, error: "exportId is required for getExportResult." };
+        }
+
+        // Retrieve secret key
+        var secretKey = "";
+        try {
+            var skData2 = server.GetTitleInternalData({ Keys: ["PlayFabSecretKey", "DeveloperSecretKey"] });
+            if (skData2 && skData2.Data) {
+                secretKey = skData2.Data["PlayFabSecretKey"] || skData2.Data["DeveloperSecretKey"] || "";
+            }
+        } catch (e) {
+            log.error("getExportResult: failed to read secret key: " + e);
+        }
+
+        if (!secretKey) {
+            return { success: false, error: "Server configuration error: PlayFabSecretKey not found in Title Internal Data." };
+        }
+
+        // Poll GetSegmentExport
+        var pollUrl     = "https://182E5E.playfabapi.com/Admin/GetSegmentExport";
+        var pollReqBody = JSON.stringify({ ExportId: exportId });
+        var pollRes;
+        try {
+            var pollRawRes = http.request(
+                pollUrl,
+                "POST",
+                pollReqBody,
+                "application/json",
+                { "X-SecretKey": secretKey, "Content-Type": "application/json" }
+            );
+            var pollParsed = JSON.parse(pollRawRes);
+            pollRes = pollParsed.data || pollParsed;
+        } catch (errPoll) {
+            log.error("getExportResult: GetSegmentExport failed: " + JSON.stringify(errPoll));
+            return { success: false, error: "GetSegmentExport request failed: " + (errPoll.message || JSON.stringify(errPoll)) };
+        }
+
+        var exportState = (pollRes && pollRes.State) ? pollRes.State : "Unknown";
+        log.info("getExportResult: state=" + exportState + " exportId=" + exportId);
+
+        // Not yet complete — tell the client to retry
+        if (exportState !== "Complete") {
+            return {
+                success:  true,
+                status:   "pending",
+                state:    exportState,
+                exportId: exportId,
+                version:  CLOUDSCRIPT_VERSION
+            };
+        }
+
+        // Export is complete — download index file, then each fragment
+        var indexUrl = pollRes.IndexUrl || "";
+        if (!indexUrl) {
+            return { success: false, error: "Export is Complete but IndexUrl is missing in GetSegmentExport response." };
+        }
+
+        // Download the index file (plain text, each line = a fragment URL)
+        var fragmentUrls = [];
+        try {
+            var indexContent = http.request(indexUrl, "GET", "", "text/plain", {});
+            var lines = indexContent.split(/\r?\n/);
+            for (var li = 0; li < lines.length; li++) {
+                var line = lines[li].trim();
+                if (line) fragmentUrls.push(line);
+            }
+        } catch (errIndex) {
+            log.error("getExportResult: failed to download index file: " + JSON.stringify(errIndex));
+            return { success: false, error: "Failed to download export index file: " + (errIndex.message || JSON.stringify(errIndex)) };
+        }
+
+        log.info("getExportResult: " + fragmentUrls.length + " fragment(s) to download");
+
+        // Download each fragment and parse TSV rows into player objects
+        // TSV columns: PlayerId, DisplayName, Email (not always present), AvatarUrl, Created, LastLogin, BannedUntil
+        var rawPlayers = [];
+        for (var fi = 0; fi < fragmentUrls.length; fi++) {
+            try {
+                var tsvContent = http.request(fragmentUrls[fi], "GET", "", "text/plain", {});
+                var rows = tsvContent.split(/\r?\n/);
+                // First row is the header
+                if (rows.length < 2) continue;
+                var headers = rows[0].split("\t");
+                var colIdx  = {};
+                for (var hi = 0; hi < headers.length; hi++) {
+                    colIdx[headers[hi].trim()] = hi;
+                }
+                for (var ri = 1; ri < rows.length; ri++) {
+                    var row = rows[ri];
+                    if (!row.trim()) continue;
+                    var cols = row.split("\t");
+                    var pfId = (colIdx["PlayerId"]    !== undefined ? (cols[colIdx["PlayerId"]]    || "").trim() : "");
+                    if (!pfId) continue;
+                    var dName     = (colIdx["DisplayName"]  !== undefined ? (cols[colIdx["DisplayName"]]  || "").trim() : "");
+                    var dEmail    = (colIdx["Email"]         !== undefined ? (cols[colIdx["Email"]]         || "").trim() : "");
+                    var dAvatar   = (colIdx["AvatarUrl"]     !== undefined ? (cols[colIdx["AvatarUrl"]]     || "").trim() : "");
+                    var dCreated  = (colIdx["Created"]       !== undefined ? (cols[colIdx["Created"]]       || "").trim() : "");
+                    var dLastLogin= (colIdx["LastLogin"]     !== undefined ? (cols[colIdx["LastLogin"]]     || "").trim() : "");
+                    var dBannedUntil = (colIdx["BannedUntil"] !== undefined ? (cols[colIdx["BannedUntil"]] || "").trim() : "");
+
+                    // Derive friendly name if missing
+                    if (!dName && dEmail) dName = dEmail.split("@")[0];
+                    if (!dName)           dName = "Player " + pfId.slice(-4);
+
+                    var isBanned = false;
+                    if (dBannedUntil) {
+                        try { isBanned = new Date(dBannedUntil) > new Date(); } catch (e) {}
+                    }
+
+                    rawPlayers.push({
+                        playFabId:   pfId,
+                        displayName: dName,
+                        email:       dEmail,
+                        avatarUrl:   dAvatar,
+                        isAdmin:     false, // enriched below
+                        isBanned:    isBanned,
+                        created:     dCreated,
+                        lastLogin:   dLastLogin
+                    });
+                }
+            } catch (errFrag) {
+                log.error("getExportResult: failed to download fragment " + fi + ": " + JSON.stringify(errFrag));
+                // Continue — partial data is better than total failure
+            }
+        }
+
+        log.info("getExportResult: parsed " + rawPlayers.length + " raw player rows");
+
+        // Enrich with IsAdmin / IsBanned from UserData (source of truth for these flags)
+        // Batch in groups of 10 to avoid rate limits
+        var enriched = [];
+        for (var ei = 0; ei < rawPlayers.length; ei++) {
+            var rp = rawPlayers[ei];
+            try {
+                var ud = server.GetUserData({ PlayFabId: rp.playFabId, Keys: ["IsAdmin", "IsBanned", "IsPremium"] });
+                if (ud && ud.Data) {
+                    if (ud.Data.IsAdmin  && ud.Data.IsAdmin.Value  === "true") rp.isAdmin  = true;
+                    if (ud.Data.IsBanned && ud.Data.IsBanned.Value === "true") rp.isBanned = true;
+                    if (ud.Data.IsPremium && ud.Data.IsPremium.Value === "true") rp.isPremium = true;
+                }
+            } catch (eEnrich) {
+                // Non-fatal — keep isAdmin:false, isBanned from TSV
+            }
+            enriched.push(rp);
+        }
+
+        log.info("getExportResult: enrichment done, returning " + enriched.length + " players");
+        return {
+            success:   true,
+            status:    "complete",
+            users:     enriched,
+            total:     enriched.length,
+            segmentId: segmentId,
+            source:    "playfab_export",
+            version:   CLOUDSCRIPT_VERSION
+        };
+    }
+
+    // ====================================================================================
+    // C. MAKE ADMIN — accepts email OR playFabId, sets IsAdmin = "true" in UserData
     // ====================================================================================
     if (action === "makeAdmin") {
         var targetEmail  = args.email      || "";
@@ -1291,15 +1859,12 @@ handlers.adminUserWorkflow = function (args, context) {
 
         if (!resolvedId) return { success: false, error: "Could not resolve user." };
 
-        // Set IsAdmin in player data
+        // Set IsAdmin in player UserData
         server.UpdateUserData({
             PlayFabId:  resolvedId,
             Data:       { "IsAdmin": "true" },
             Permission: "Public"
         });
-
-        // Sync registry
-        _upsertRegistry({ playFabId: resolvedId, displayName: resolvedName, email: resolvedEmail, isAdmin: true, isBanned: false });
 
         // Send notification
         log.info("Sending admin granted notification to: " + resolvedId);
@@ -1310,7 +1875,6 @@ handlers.adminUserWorkflow = function (args, context) {
             "admin_granted",
             { grantedAt: new Date().toISOString() }
         );
-        log.info("Admin notification result: " + JSON.stringify(adminNotifResult));
 
         return { success: true, message: "Admin granted.", playFabId: resolvedId, displayName: resolvedName, email: resolvedEmail };
     }
@@ -1341,13 +1905,6 @@ handlers.adminUserWorkflow = function (args, context) {
             Permission: "Public"
         });
 
-        // Sync registry
-        var rlist = _readRegistry();
-        for (var ri = 0; ri < rlist.length; ri++) {
-            if (rlist[ri].playFabId === rId) { rlist[ri].isAdmin = false; break; }
-        }
-        _saveRegistry(rlist);
-
         // Send notification
         log.info("Sending admin revoked notification to: " + rId);
         var revokeNotifResult = sendNotification(
@@ -1357,9 +1914,70 @@ handlers.adminUserWorkflow = function (args, context) {
             "admin_revoked",
             { revokedAt: new Date().toISOString() }
         );
-        log.info("Revoke notification result: " + JSON.stringify(revokeNotifResult));
 
         return { success: true, message: "Admin revoked.", playFabId: rId, email: rEmail };
+    }
+
+    // ====================================================================================
+    // D2. PREMIUM — grant/revoke music upload access. Sets IsPremium in UserData.
+    //     Permission "Public" matches IsAdmin/IsBanned so the Unity client can read
+    //     it back through PlayFabClientAPI.GetUserData.
+    // ====================================================================================
+    if (action === "makePremium" || action === "revokePremium") {
+        var granting  = (action === "makePremium");
+        var pEmail    = args.email     || "";
+        var pPfId     = args.playFabId || "";
+        var pId       = "";
+        var pName     = "";
+
+        if (pPfId) {
+            pId = pPfId;
+            try {
+                var pInfo = server.GetUserAccountInfo({ PlayFabId: pPfId });
+                pName = (pInfo.UserInfo && pInfo.UserInfo.TitleInfo && pInfo.UserInfo.TitleInfo.DisplayName)
+                    ? pInfo.UserInfo.TitleInfo.DisplayName : pPfId;
+                if (!pEmail && pInfo.UserInfo && pInfo.UserInfo.PrivateInfo) {
+                    pEmail = pInfo.UserInfo.PrivateInfo.Email || "";
+                }
+            } catch (e) { pName = pPfId; }
+        } else if (pEmail) {
+            try {
+                var pLookup = server.GetUserAccountInfo({ Email: pEmail });
+                if (!pLookup || !pLookup.UserInfo) return { success: false, error: "No account found with that email." };
+                pId   = pLookup.UserInfo.PlayFabId;
+                pName = (pLookup.UserInfo.TitleInfo && pLookup.UserInfo.TitleInfo.DisplayName)
+                    ? pLookup.UserInfo.TitleInfo.DisplayName : pEmail;
+            } catch (e) { return { success: false, error: "No account found with that email address." }; }
+        } else {
+            return { success: false, error: "Email or PlayFabId is required." };
+        }
+
+        if (!pId) return { success: false, error: "Could not resolve user." };
+
+        server.UpdateUserData({
+            PlayFabId:  pId,
+            Data:       { "IsPremium": granting ? "true" : "false" },
+            Permission: "Public"
+        });
+
+        sendNotification(
+            pId,
+            granting ? "Premium Unlocked" : "Premium Ended",
+            granting
+                ? "You can now upload your own music. Every track is reviewed by an admin before it goes live."
+                : "Your premium access has ended. Music uploads are no longer available on your account.",
+            granting ? "premium_granted" : "premium_revoked",
+            { changedAt: new Date().toISOString() }
+        );
+
+        return {
+            success:     true,
+            message:     granting ? "Premium granted." : "Premium revoked.",
+            isPremium:   granting,
+            playFabId:   pId,
+            displayName: pName,
+            email:       pEmail
+        };
     }
 
     // ====================================================================================
@@ -1395,13 +2013,6 @@ handlers.adminUserWorkflow = function (args, context) {
         });
 
         try { server.BanUsers({ Bans: [{ PlayFabId: bId, Reason: "Banned via Kangi Admin Dashboard", DurationInHours: 87600 }] }); } catch (e) {}
-
-        // Sync registry
-        var blist = _readRegistry();
-        for (var bi = 0; bi < blist.length; bi++) {
-            if (blist[bi].playFabId === bId) { blist[bi].isBanned = true; blist[bi].isAdmin = false; break; }
-        }
-        _saveRegistry(blist);
 
         // Send notification to user
         sendNotification(
@@ -1458,8 +2069,6 @@ handlers.adminUserWorkflow = function (args, context) {
                 }
             }
         } catch (e) {
-            // RevokeAllBansForUser might not be available in all CloudScript versions
-            // Try RevokeBans as fallback
             try {
                 server.RevokeAllBansForUser({ PlayFabId: uId });
             } catch (e2) {
@@ -1467,14 +2076,7 @@ handlers.adminUserWorkflow = function (args, context) {
             }
         }
 
-        // 3. Sync registry
-        var ulist = _readRegistry();
-        for (var ui = 0; ui < ulist.length; ui++) {
-            if (ulist[ui].playFabId === uId) { ulist[ui].isBanned = false; break; }
-        }
-        _saveRegistry(ulist);
-
-        // 4. Send notification to user
+        // 3. Send notification to user
         sendNotification(
             uId,
             "Account Restored",
@@ -1709,4 +2311,100 @@ handlers.supportWorkflow = function (args, context) {
     }
 
     return { success: false, error: "Unknown action: " + action };
+};
+
+// ====================================================================================
+// PLAYSTREAM AUTOMATION & DIRECT HANDLERS FOR FIREBASE SYNC
+// 1. onPlayerCreated: Fires on PlayFab PlayStream 'player_created' / 'player_logged_in' Rule
+// 2. syncPlayerToFirebase: Explicit trigger from client or admin tool
+// ====================================================================================
+
+handlers.onPlayerCreated = function (args, context) {
+    var playerId = null;
+    var displayName = "";
+    var email = "";
+    var avatarUrl = "";
+
+    if (context && context.playStreamEvent) {
+        var ev = context.playStreamEvent;
+        playerId = ev.PlayerId || ev.EntityId || null;
+        if (ev.UserInfo) {
+            displayName = ev.UserInfo.TitleInfo ? ev.UserInfo.TitleInfo.DisplayName : (ev.UserInfo.Username || "");
+            email = ev.UserInfo.PrivateInfo ? ev.UserInfo.PrivateInfo.Email : "";
+        }
+    }
+
+    if (!playerId && args) {
+        playerId = args.playFabId || args.playerId || currentPlayerId;
+        displayName = args.displayName || "";
+        email = args.email || "";
+        avatarUrl = args.avatarUrl || "";
+    }
+
+    if (!playerId) {
+        return { success: false, error: "No PlayerId found in event or args." };
+    }
+
+    // Add to Live Registry group
+    try {
+        server.AddSharedGroupMembers({ SharedGroupId: "AllRegisteredPlayers", PlayFabIds: [playerId] });
+    } catch (e) {
+        try {
+            server.CreateSharedGroup({ SharedGroupId: "AllRegisteredPlayers" });
+            server.AddSharedGroupMembers({ SharedGroupId: "AllRegisteredPlayers", PlayFabIds: [playerId] });
+        } catch (e2) {}
+    }
+
+    // Sync to Firebase
+    var syncRes = _syncPlayerToFirebase(playerId, displayName, email, avatarUrl, { isNewRegistration: true });
+    return { success: true, playFabId: playerId, firebaseSync: syncRes };
+};
+
+handlers.syncPlayerToFirebase = function(args, context) {
+    var pId = (args && args.playFabId) || currentPlayerId;
+    return _syncPlayerToFirebase(
+        pId, 
+        args ? args.displayName : "", 
+        args ? args.email : "", 
+        args ? args.avatarUrl : "", 
+        args ? args.additionalFields : null
+    );
+};
+
+
+/* One-time bootstrap: writes the Firebase service credentials into Title
+   INTERNAL Data, which is server-only and unreadable by any game client.
+
+   Game Manager no longer exposes an internal-data table, so run this once from
+   Automation > Scheduled Tasks (type: Run CloudScript, function:
+   setFirebaseCredentials) with an argument of:
+
+       { "email": "...", "password": "..." }
+
+   Then DELETE the scheduled task, so the credentials do not linger in its
+   argument. Never put these values in Title Data -- that table is readable by
+   every client. */
+handlers.setFirebaseCredentials = function (args, context) {
+    if (!args || !args.email || !args.password) {
+        return { success: false, error: "Pass both email and password in the task argument." };
+    }
+
+    try {
+        server.SetTitleInternalData({ Key: "Firebase_SvcEmail",    Value: String(args.email) });
+        server.SetTitleInternalData({ Key: "Firebase_SvcPassword", Value: String(args.password) });
+    } catch (eSet) {
+        return { success: false, error: "SetTitleInternalData failed: " + (eSet.message || String(eSet)) };
+    }
+
+    // Read back through the same call the sync uses, so a pass here means the
+    // sync will find them too. Values are never echoed.
+    var check = server.GetTitleInternalData({ Keys: ["Firebase_SvcEmail", "Firebase_SvcPassword"] });
+    var d = (check && check.Data) ? check.Data : {};
+
+    return {
+        success:     !!(d["Firebase_SvcEmail"] && d["Firebase_SvcPassword"]),
+        emailSet:    !!d["Firebase_SvcEmail"],
+        passwordSet: !!d["Firebase_SvcPassword"],
+        message:     "Delete this scheduled task now that it has run."
+    };
 };

@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Player records written by PlayFab CloudScript (_syncPlayerToFirebase in
+// cloudscript.js) and read by the admin dashboard.
+//
+// Two identities, least privilege:
+//   - the sync service writes; its credentials live in PlayFab Title Internal
+//     Data, which is server-side only and never shipped to a game client
+//   - the admin dashboard only ever reads
+//
+// The Firebase apiKey in service.js is public by design and grants nothing on
+// its own.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSyncService() {
+      return request.auth != null
+          && request.auth.uid == 'jTSGikepdZhm0sglzYpJ11GZ5M72';
+    }
+
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.uid in ['Al7mSTibWETOidkxikvR4KxDCEo1'];
+    }
+
+    match /users/{playFabId} {
+      allow read:  if isSyncService() || isAdmin();
+      allow write: if isSyncService();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
