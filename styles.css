@@ -396,9 +396,9 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .stat-body span { font-size: 0.8rem; color: var(--text-2); }
 
 /* ---- Dashboard Grid ---- */
-.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; align-items: start; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.1rem; align-items: start; }
 .dash-grid--single { display: block; }
-#dashUsersList, #recentNftsList {
+#dashUsersList, #recentNftsList, #dashSoundsList {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;

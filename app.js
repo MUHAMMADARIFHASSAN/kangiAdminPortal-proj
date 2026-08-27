@@ -47,6 +47,7 @@
     statRedeemed:   $('statRedeemed'),
     statUsers:      $('statUsers'),
     dashUsersList:  $('dashUsersList'),
+    dashSoundsList: $('dashSoundsList'),
     recentList:     $('recentNftsList'),
 
     /* Create */
@@ -509,15 +510,20 @@
      ================================================================ */
   async function _loadAllData() {
     try {
-      const [nftsRes, usersRes] = await Promise.allSettled([
+      const [nftsRes, usersRes, songsRes] = await Promise.allSettled([
         KangiService.getNfts(),
-        _fetchAndEnrichUsers()
+        _fetchAndEnrichUsers(),
+        KangiService.getSongs()
       ]);
 
       state.nfts = (nftsRes.status === 'fulfilled' && nftsRes.value && Array.isArray(nftsRes.value.nfts)) ? nftsRes.value.nfts : [];
       if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
         state.allUsers = usersRes.value;
         state.filteredUsers = usersRes.value;
+      }
+      if (songsRes.status === 'fulfilled' && songsRes.value) {
+        const sData = songsRes.value;
+        state.songs = Array.isArray(sData.songs) ? sData.songs : (Array.isArray(sData) ? sData : []);
       }
     } catch (e) {
       console.error('[Kangi] Data load error:', e);
@@ -529,6 +535,7 @@
   function _renderAll() {
     _renderStats();
     _renderDashboardUsers();
+    _renderDashboardSongs();
     _renderRecent();
     _renderLibrary();
     if (state.allUsers && state.allUsers.length && el.usersList) {
@@ -578,6 +585,56 @@
       const card = _createUserCardElement(user);
       el.dashUsersList.appendChild(card);
     });
+  }
+
+  /* ─── Recent Sounds (dashboard) ─── */
+  function _renderDashboardSongs() {
+    if (!el.dashSoundsList) return;
+    const songs = state.songs || [];
+    if (!songs.length) {
+      el.dashSoundsList.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:36px;height:36px;opacity:0.4;color:var(--pink);"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          <p>No audio tracks yet</p>
+        </div>`;
+      return;
+    }
+
+    el.dashSoundsList.innerHTML = songs.slice(0, 6).map(song => {
+      const isPending = song.isPending === true || song.isPending === "true";
+      const title = song.SongName || song.title || song.SongTitle || song.songTitle || song.Title || song.name || song.Name || "Untitled Song";
+      const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
+      const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
+      const artist = singer || uploader || "Unknown Artist";
+      const cover = song.avatarUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.avatar || song.photoURL || song.photoUrl || song.imageUrl || song.image || "";
+      const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
+
+      let artistSub = _esc(artist);
+      if (singer && uploader && singer.toLowerCase() !== uploader.toLowerCase()) {
+        artistSub = `${_esc(singer)} <span style="opacity:0.65;font-weight:normal;">• by ${_esc(uploader)}</span>`;
+      } else if (!singer && uploader) {
+        artistSub = `${_esc(uploader)}`;
+      }
+
+      return `
+        <div class="recent-item" style="cursor:pointer;" onclick="document.querySelector('[data-view=sounds]').click()" title="Click to view in Sounds Library">
+          ${cover ? `
+            <img class="recent-thumb" src="${_esc(cover)}" alt="${_esc(artist)}" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='grid';" />
+            <div class="recent-thumb" style="display:none;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);border-radius:8px;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          ` : `
+            <div class="recent-thumb" style="display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);border-radius:8px;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          `}
+          <div class="recent-info">
+            <div class="recent-name">${_esc(title)}</div>
+            <div class="recent-sub">${artistSub}</div>
+          </div>
+          <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Available'}</span>
+        </div>`;
+    }).join('');
   }
 
   /* ─── Recent TCGs (dashboard) ─── */
@@ -989,6 +1046,7 @@
       state.songs = [];
     }
     _renderSongsList();
+    _renderDashboardSongs();
   }
 
   function _renderSongsList() {
@@ -1015,8 +1073,10 @@
       const isPending = song.isPending === true || song.isPending === "true";
       const songId = song.SongId || song.id;
       const title = song.SongName || song.title || song.SongTitle || song.songTitle || song.Title || song.name || song.Name || "Untitled Song";
-      const artist = song.Singer || song.artist || song.artistName || song.SingerName || "Unknown Artist";
-      const cover = song.CoverUrl || song.cover || "";
+      const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
+      const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
+      const artist = singer || uploader || "Unknown Artist";
+      const cover = song.avatarUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.avatar || song.photoURL || song.photoUrl || song.imageUrl || song.image || "";
       const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
 
       const modes     = Array.isArray(song.modes) ? song.modes : [];
@@ -1030,6 +1090,13 @@
         { key: 'kawaii_mode',     label: 'Kawaii Mode' }
       ];
 
+      let artistDisplay = _esc(artist);
+      if (singer && uploader && singer.toLowerCase() !== uploader.toLowerCase()) {
+        artistDisplay = `${_esc(singer)} <span style="opacity:0.65;font-weight:normal;">• Uploaded by ${_esc(uploader)}</span>`;
+      } else if (!singer && uploader) {
+        artistDisplay = `${_esc(uploader)} <span style="opacity:0.65;font-weight:normal;">(Artist)</span>`;
+      }
+
       const entry = document.createElement('div');
       entry.className = 'song-entry';
 
@@ -1037,7 +1104,10 @@
       row.className = 'song-item';
       row.innerHTML = `
         ${cover ? `
-          <img class="song-cover" src="${_esc(cover)}" alt="Cover" data-action="preview" data-url="${_esc(songUrl)}" style="cursor:pointer;" title="Click to play/pause" />
+          <img class="song-cover" src="${_esc(cover)}" alt="${_esc(artist)}" data-action="preview" data-url="${_esc(songUrl)}" style="cursor:pointer;" title="Click to play/pause" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='grid';" />
+          <div class="song-cover" style="display:none;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);cursor:pointer;" data-action="preview" data-url="${_esc(songUrl)}" title="Click to play/pause">
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          </div>
         ` : `
           <div class="song-cover" style="display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);cursor:pointer;" data-action="preview" data-url="${_esc(songUrl)}" title="Click to play/pause">
             <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
@@ -1045,7 +1115,7 @@
         `}
         <div class="song-meta">
           <span class="song-title-text">${_esc(title)}</span>
-          <span class="song-artist-text">${_esc(artist)}</span>
+          <span class="song-artist-text">${artistDisplay}</span>
           <div style="margin-top:0.35rem;display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;">
             <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Available'}</span>
             ${modes.length
@@ -1380,7 +1450,10 @@
       try {
         const res = await KangiService.updateSongSettings(songId, modes, start, end);
         if (res && res.success) {
-          _alert(el.soundsAlert, 'success', '✓ Song settings saved.');
+          const notifMsg = res.notificationSent
+            ? '✓ Song settings saved — owner notified.'
+            : '✓ Song settings saved.';
+          _alert(el.soundsAlert, 'success', notifMsg);
           await _loadSongsData();
         } else {
           _alert(el.soundsAlert, 'error', (res && res.error) || 'Could not save song settings.');
@@ -1739,11 +1812,13 @@
     const friendlyName   = _getUserDisplayName(user);
     const initial        = friendlyName.charAt(0).toUpperCase();
     const characterCount = (user.unlockedCharacters || []).length;
+    const avatar         = user.avatarUrl || user.AvatarUrl || user.avatar || user.photoURL || user.photoUrl || user.imageUrl || user.image || '';
 
     card.innerHTML = `
       <div class="user-card-left">
-        ${user.avatarUrl
-          ? `<img class="user-card-avatar" src="${_esc(user.avatarUrl)}" alt="${_esc(friendlyName)}" />`
+        ${avatar
+          ? `<img class="user-card-avatar" src="${_esc(avatar)}" alt="${_esc(friendlyName)}" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
+             <div class="user-card-avatar user-card-avatar--letter" style="display:none;">${_esc(initial)}</div>`
           : `<div class="user-card-avatar user-card-avatar--letter">${_esc(initial)}</div>`
         }
       </div>
