@@ -852,7 +852,10 @@ const KangiService = (function () {
         notifications,
         isAdmin: !!flags.isAdmin,
         showLogs: !!flags.showLogs,
-        isPremium: !!flags.isPremium
+        isPremium: !!flags.isPremium,
+        isBanned: !!flags.isBanned,
+        bannedUntil: flags.bannedUntil || '',
+        banReason: flags.banReason || ''
       };
     } catch (err) {
       console.error('[PlayFab] Error fetching internal details for', playFabId, err);
@@ -864,6 +867,9 @@ const KangiService = (function () {
         isAdmin: false,
         showLogs: false,
         isPremium: false,
+        isBanned: false,
+        bannedUntil: '',
+        banReason: '',
         error: err?.message || 'Failed to fetch PlayFab internal data.'
       };
     }

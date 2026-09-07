@@ -2155,8 +2155,15 @@
         const res = await KangiService.unbanUser(email, playFabId);
         if (res && res.success) {
           state.selectedUser.isBanned = false;
+          state.selectedUser.bannedUntil = '';
+          state.selectedUser.banReason = '';
+          const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === playFabId) || (u.id && u.id === state.selectedUser.id));
+          if (idx !== -1) {
+            state.allUsers[idx] = { ...state.allUsers[idx], isBanned: false, bannedUntil: '', banReason: '' };
+          }
           _modalAlert('success', `✓ ${displayName || email} has been unbanned.`);
           _updateModalButtons(state.selectedUser);
+          await _showUserDetails(state.selectedUser);
           await _loadUsers();
         } else {
           _modalAlert('error', (res && res.error) || 'Failed to unban user.');
@@ -2180,8 +2187,14 @@
         if (res && res.success) {
           state.selectedUser.isBanned = true;
           state.selectedUser.isAdmin  = false;
+          state.selectedUser.bannedUntil = res.bannedUntil || '';
+          const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === playFabId) || (u.id && u.id === state.selectedUser.id));
+          if (idx !== -1) {
+            state.allUsers[idx] = { ...state.allUsers[idx], isBanned: true, isAdmin: false, bannedUntil: res.bannedUntil || '' };
+          }
           _modalAlert('success', `✓ ${displayName || email} banned ${label}.`);
           _updateModalButtons(state.selectedUser);
+          await _showUserDetails(state.selectedUser);
           await _loadUsers();
         } else {
           _modalAlert('error', (res && res.error) || 'Ban failed.');
@@ -2299,9 +2312,18 @@
       if (user.playFabId) {
         pfDetails = await KangiService.getPlayFabUserDetails(user.playFabId);
         user.unlockedCharacters = pfDetails.unlockedCharacters || [];
-        if (pfDetails.isAdmin !== undefined)  user.isAdmin  = pfDetails.isAdmin;
-        if (pfDetails.showLogs !== undefined) user.showLogs = pfDetails.showLogs;
+        if (pfDetails.isAdmin !== undefined)   user.isAdmin   = pfDetails.isAdmin;
+        if (pfDetails.showLogs !== undefined)  user.showLogs  = pfDetails.showLogs;
         if (pfDetails.isPremium !== undefined) user.isPremium = pfDetails.isPremium;
+        if (pfDetails.isBanned !== undefined)  user.isBanned  = pfDetails.isBanned;
+        if (pfDetails.bannedUntil !== undefined) user.bannedUntil = pfDetails.bannedUntil;
+        if (pfDetails.banReason !== undefined)   user.banReason   = pfDetails.banReason;
+
+        // Keep local user memory synchronized
+        const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === user.playFabId) || (u.id && u.id === user.id));
+        if (idx !== -1) {
+          state.allUsers[idx] = { ...state.allUsers[idx], ...user };
+        }
       }
     } catch (pfErr) {
       console.warn('[DWM] PlayFab internal fetch notice:', pfErr);
@@ -2326,6 +2348,7 @@
             ${user.isAdmin  ? '<span class="chip chip--purple">Admin</span>'  : ''}
             ${user.showLogs ? '<span class="chip chip--teal">Logs: ON</span>' : ''}
             ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
+            ${user.isBanned && user.bannedUntil ? `<span class="chip chip--orange" style="font-size:0.65rem;">Until: ${new Date(user.bannedUntil).toLocaleDateString()}</span>` : ''}
             <span class="chip chip--teal" style="font-size:0.65rem;">PlayFab Connected</span>
           </div>
         </div>
@@ -2349,7 +2372,7 @@
           </div>
           <div class="up-info-item">
             <span class="up-info-label">Account Status</span>
-            <span class="up-info-value">${user.isBanned ? '🔴 Banned' : '🟢 Active'}</span>
+            <span class="up-info-value">${user.isBanned ? '🔴 Banned' + (user.bannedUntil ? ` (Until ${new Date(user.bannedUntil).toLocaleDateString()})` : ' (Permanent)') : '🟢 Active'}</span>
           </div>
           <div class="up-info-item">
             <span class="up-info-label">Joined</span>

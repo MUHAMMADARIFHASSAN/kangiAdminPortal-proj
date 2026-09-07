@@ -1995,22 +1995,68 @@ handlers.adminUserWorkflow = function (args, context) {
     }
 
     // ====================================================================================
-    // D2. GET USER DATA FLAGS — Query IsAdmin, ShowLogs, IsPremium from UserData
+    // D2. GET USER DATA FLAGS — Query IsAdmin, ShowLogs, IsPremium, IsBanned from UserData
     // ====================================================================================
     if (action === "getUserDataFlags") {
         var uPfId = args.playFabId || "";
-        if (!uPfId) return { success: false, isAdmin: false, showLogs: false, isPremium: false };
+        if (!uPfId) return { success: false, isAdmin: false, showLogs: false, isPremium: false, isBanned: false, bannedUntil: "", banReason: "" };
         try {
-            var uDataRes = server.GetUserData({ PlayFabId: uPfId, Keys: ["IsAdmin", "ShowLogs", "showLogs", "IsPremium"] });
+            var uDataRes = server.GetUserData({
+                PlayFabId: uPfId,
+                Keys: ["IsAdmin", "ShowLogs", "showLogs", "IsPremium", "IsBanned", "isBanned", "BannedUntil", "BanExpiry", "SuspendedUntil", "BanExpiresAt", "BanReason", "BanDurationDays"]
+            });
             var uIsAdmin = false;
             var uShowLogs = false;
             var uIsPremium = false;
+            var uIsBanned = false;
+            var uBannedUntil = "";
+            var uBanReason = "";
+
             if (uDataRes && uDataRes.Data) {
                 if (uDataRes.Data.IsAdmin && (uDataRes.Data.IsAdmin.Value === "true" || uDataRes.Data.IsAdmin.Value === "1")) uIsAdmin = true;
                 if (uDataRes.Data.IsPremium && (uDataRes.Data.IsPremium.Value === "true" || uDataRes.Data.IsPremium.Value === "1")) uIsPremium = true;
                 var slVal = uDataRes.Data.ShowLogs ? uDataRes.Data.ShowLogs.Value : (uDataRes.Data.showLogs ? uDataRes.Data.showLogs.Value : "");
                 if (slVal && (slVal.toLowerCase() === "true" || slVal === "1")) uShowLogs = true;
+
+                var banFlag = uDataRes.Data.IsBanned ? uDataRes.Data.IsBanned.Value : (uDataRes.Data.isBanned ? uDataRes.Data.isBanned.Value : "");
+                if (banFlag && (banFlag.toLowerCase() === "true" || banFlag === "1")) {
+                    uIsBanned = true;
+                }
+
+                uBannedUntil = (uDataRes.Data.BannedUntil && uDataRes.Data.BannedUntil.Value) ||
+                               (uDataRes.Data.BanExpiry && uDataRes.Data.BanExpiry.Value) ||
+                               (uDataRes.Data.SuspendedUntil && uDataRes.Data.SuspendedUntil.Value) ||
+                               (uDataRes.Data.BanExpiresAt && uDataRes.Data.BanExpiresAt.Value) || "";
+                uBanReason = (uDataRes.Data.BanReason && uDataRes.Data.BanReason.Value) || "";
+
+                // Check if temporary ban has expired
+                if (uIsBanned && uBannedUntil) {
+                    try {
+                        var expMs = new Date(uBannedUntil).getTime();
+                        if (!isNaN(expMs) && expMs > 0 && expMs <= new Date().getTime()) {
+                            // Ban expired! Auto-lift
+                            uIsBanned = false;
+                            uBannedUntil = "";
+                            try {
+                                server.UpdateUserData({
+                                    PlayFabId: uPfId,
+                                    Data: {
+                                        "IsBanned": "false",
+                                        "BannedUntil": "",
+                                        "BanExpiry": "",
+                                        "SuspendedUntil": "",
+                                        "BanExpiresAt": "",
+                                        "BanDurationDays": "",
+                                        "BanReason": ""
+                                    },
+                                    Permission: "Public"
+                                });
+                            } catch (eAutoUnban) {}
+                        }
+                    } catch (eDate) {}
+                }
             }
+
             // Auto-revoke any legacy native PlayFab bans so user can authenticate and be handled by in-app suspension
             try {
                 var bansCheck = server.GetUserBans({ PlayFabId: uPfId });
@@ -2024,9 +2070,17 @@ handlers.adminUserWorkflow = function (args, context) {
                 }
             } catch (eBanCheck) {}
 
-            return { success: true, isAdmin: uIsAdmin, showLogs: uShowLogs, isPremium: uIsPremium };
+            return {
+                success: true,
+                isAdmin: uIsAdmin,
+                showLogs: uShowLogs,
+                isPremium: uIsPremium,
+                isBanned: uIsBanned,
+                bannedUntil: uBannedUntil,
+                banReason: uBanReason
+            };
         } catch (e) {
-            return { success: false, isAdmin: false, showLogs: false, isPremium: false };
+            return { success: false, isAdmin: false, showLogs: false, isPremium: false, isBanned: false, bannedUntil: "", banReason: "" };
         }
     }
 
