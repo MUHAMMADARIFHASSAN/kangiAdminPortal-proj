@@ -2011,6 +2011,19 @@ handlers.adminUserWorkflow = function (args, context) {
                 var slVal = uDataRes.Data.ShowLogs ? uDataRes.Data.ShowLogs.Value : (uDataRes.Data.showLogs ? uDataRes.Data.showLogs.Value : "");
                 if (slVal && (slVal.toLowerCase() === "true" || slVal === "1")) uShowLogs = true;
             }
+            // Auto-revoke any legacy native PlayFab bans so user can authenticate and be handled by in-app suspension
+            try {
+                var bansCheck = server.GetUserBans({ PlayFabId: uPfId });
+                if (bansCheck && bansCheck.BanData && bansCheck.BanData.length > 0) {
+                    for (var bi = 0; bi < bansCheck.BanData.length; bi++) {
+                        if (bansCheck.BanData[bi].Active) {
+                            server.RevokeAllBansForUser({ PlayFabId: uPfId });
+                            break;
+                        }
+                    }
+                }
+            } catch (eBanCheck) {}
+
             return { success: true, isAdmin: uIsAdmin, showLogs: uShowLogs, isPremium: uIsPremium };
         } catch (e) {
             return { success: false, isAdmin: false, showLogs: false, isPremium: false };
@@ -2138,15 +2151,10 @@ handlers.adminUserWorkflow = function (args, context) {
             Permission: "Public"
         });
 
+        // Ensure native PlayFab login block is revoked so user can log in, receive notifications & send support messages
         try {
-            server.BanUsers({
-                Bans: [{
-                    PlayFabId: bId,
-                    Reason: bReason,
-                    DurationInHours: banDurationHours
-                }]
-            });
-        } catch (e) {}
+            server.RevokeAllBansForUser({ PlayFabId: bId });
+        } catch (eRevoke) {}
 
         // Send rich notification to user
         sendNotification(
