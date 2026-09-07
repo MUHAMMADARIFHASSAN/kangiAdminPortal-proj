@@ -40,6 +40,9 @@
     settingsAvatar:      $('settingsAvatar'),
     settingsThemeToggle: $('settingsThemeToggle'),
     settingsRefreshBtn:  $('settingsRefreshBtn'),
+    appConfigAlert:      $('appConfigAlert'),
+    showLogsStatusBadge: $('showLogsStatusBadge'),
+    toggleShowLogsBtn:   $('toggleShowLogsBtn'),
 
     /* Dashboard */
     statNfts:       $('statNfts'),
@@ -270,10 +273,79 @@
         el.settingsRefreshBtn.textContent = 'Syncing...';
         await _loadAllData();
         await _loadSongsData();
+        await _loadAppConfig();
         el.settingsRefreshBtn.disabled = false;
         el.settingsRefreshBtn.textContent = 'Refresh Data';
       });
     }
+
+    /* ── App Configuration (ShowLogs Toggle) ── */
+    let currentShowLogs = false;
+
+    async function _loadAppConfig() {
+      if (!el.showLogsStatusBadge) return;
+      el.showLogsStatusBadge.textContent = 'Loading...';
+      el.showLogsStatusBadge.className = 'badge badge-teal';
+      try {
+        const res = await KangiService.getAppConfig();
+        currentShowLogs = !!(res && res.showLogs);
+        _updateShowLogsUI(currentShowLogs);
+      } catch (err) {
+        el.showLogsStatusBadge.textContent = 'Offline / Default (Off)';
+        el.showLogsStatusBadge.className = 'badge badge-warning';
+        if (el.toggleShowLogsBtn) {
+          el.toggleShowLogsBtn.textContent = 'Enable Logs';
+          el.toggleShowLogsBtn.className = 'btn btn-primary btn-sm';
+        }
+      }
+    }
+
+    function _updateShowLogsUI(enabled) {
+      currentShowLogs = enabled;
+      if (el.showLogsStatusBadge) {
+        if (enabled) {
+          el.showLogsStatusBadge.textContent = '● Enabled (Active)';
+          el.showLogsStatusBadge.className = 'badge badge-success';
+        } else {
+          el.showLogsStatusBadge.textContent = '○ Disabled (Hidden)';
+          el.showLogsStatusBadge.className = 'badge badge-secondary';
+        }
+      }
+      if (el.toggleShowLogsBtn) {
+        if (enabled) {
+          el.toggleShowLogsBtn.textContent = 'Disable Logs';
+          el.toggleShowLogsBtn.className = 'btn btn-danger btn-sm';
+        } else {
+          el.toggleShowLogsBtn.textContent = 'Enable Logs';
+          el.toggleShowLogsBtn.className = 'btn btn-primary btn-sm';
+        }
+      }
+    }
+
+    if (el.toggleShowLogsBtn) {
+      el.toggleShowLogsBtn.addEventListener('click', async () => {
+        const targetState = !currentShowLogs;
+        el.toggleShowLogsBtn.disabled = true;
+        el.toggleShowLogsBtn.innerHTML = '<span class="btn-loader" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span>Saving...';
+        try {
+          const res = await KangiService.setShowLogs(targetState);
+          if (res && res.success) {
+            _updateShowLogsUI(targetState);
+            _alert(el.appConfigAlert, 'success', `✓ In-game console logs ${targetState ? 'ENABLED' : 'DISABLED'} successfully in PlayFab Title Data.`);
+            setTimeout(() => _hideEl(el.appConfigAlert), 4000);
+          } else {
+            throw new Error(res?.error || 'Failed to update ShowLogs setting');
+          }
+        } catch (err) {
+          _alert(el.appConfigAlert, 'error', `Failed to update configuration: ${err?.message || err}`);
+        } finally {
+          el.toggleShowLogsBtn.disabled = false;
+        }
+      });
+    }
+
+    // Expose for external refreshes
+    window._reloadAppConfig = _loadAppConfig;
 
     /* The JSON box mirrors the config for copy/paste; the admin password must
        never be rendered into it as plain text. */
@@ -494,6 +566,11 @@
     el.pageTitle.textContent = meta.title;
     el.pageSub.textContent   = meta.sub;
 
+    if (name === 'settings') {
+      if (typeof window._reloadAppConfig === 'function') {
+        window._reloadAppConfig();
+      }
+    }
     if (name === 'sounds') {
       await _loadSongsData();
     }

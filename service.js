@@ -298,6 +298,20 @@ const KangiService = (function () {
   function revokePremium(email, playFabId) { return _callAdminScript('revokePremium', { email: email || '', playFabId: playFabId || '' }); }
 
   /* ============================================================
+     APP CONFIGURATION (In-Game Console & Remote Toggles)
+     ============================================================ */
+
+  /* Fetch global App Configuration (e.g. ShowLogs title data) */
+  function getAppConfig() {
+    return _callAdminScript('getAppConfig', {});
+  }
+
+  /* Set In-Game Debug Console ShowLogs flag */
+  function setShowLogs(showLogs) {
+    return _callAdminScript('setShowLogs', { showLogs: !!showLogs });
+  }
+
+  /* ============================================================
      IMAGE UTIL — resize + compress before storing
      ============================================================ */
   function resizeImage(file, maxWidth = 240) {
@@ -860,6 +874,8 @@ const KangiService = (function () {
     unbanUser,
     makePremium,
     revokePremium,
+    getAppConfig,
+    setShowLogs,
     getUserCharacters,
     sendNotification,
     getNotifications,

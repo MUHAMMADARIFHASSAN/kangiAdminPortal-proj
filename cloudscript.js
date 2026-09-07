@@ -311,12 +311,16 @@ handlers.videoAppWorkflow = function (args, context) {
         var uFound = false;
         var uApproved = [];
         var uPending  = [];
+        var targetSongOwnerId = "";
+        var targetSongTitle = "";
 
         for (var ui = 0; ui < uSongs.length; ui++) {
             if (uSongs[ui].SongId === uSongId) {
                 uSongs[ui].modes     = cleanModes;
                 uSongs[ui].trimStart = tStart;
                 uSongs[ui].trimEnd   = tEnd;
+                targetSongOwnerId    = uSongs[ui].uploaderId || uSongs[ui].ownerId || uSongs[ui].uploader || "";
+                targetSongTitle      = uSongs[ui].SongName || uSongs[ui].title || uSongs[ui].name || uSongs[ui].songTitle || uSongs[ui].SongTitle || "";
                 uFound = true;
             }
             if (uSongs[ui].isPending === true || uSongs[ui].isPending === "true") {
@@ -333,13 +337,50 @@ handlers.videoAppWorkflow = function (args, context) {
             Value: JSON.stringify({ songs: uSongs, approvedSongs: uApproved, pendingSongs: uPending })
         });
 
+        // Send notification to song owner when modes / trim are saved
+        var notifSent = false;
+        if (targetSongOwnerId && targetSongOwnerId !== "") {
+            var modeLabels = [];
+            for (var mli = 0; mli < cleanModes.length; mli++) {
+                if (cleanModes[mli] === "dance_challenge") modeLabels.push("Dance Challenge");
+                else if (cleanModes[mli] === "mirror_mii") modeLabels.push("Mirror Mii!");
+                else if (cleanModes[mli] === "kawaii_mode") modeLabels.push("Kawaii Mode");
+                else modeLabels.push(cleanModes[mli]);
+            }
+            var modeStr = modeLabels.length ? modeLabels.join(", ") : "None";
+            var trimStr = (tEnd > tStart) ? (tStart + "s - " + tEnd + "s") : "Full Track";
+            var notifTitle = "Song Settings Updated 🎵";
+            var notifMsg = targetSongTitle
+                ? "Settings updated for '" + targetSongTitle + "': Modes (" + modeStr + "), Trim (" + trimStr + ")."
+                : "Your song settings have been updated: Modes (" + modeStr + "), Trim (" + trimStr + ").";
+
+            var notifRes = sendNotification(
+                targetSongOwnerId,
+                notifTitle,
+                notifMsg,
+                "audio_settings_updated",
+                {
+                    songId:    uSongId,
+                    songTitle: targetSongTitle,
+                    modes:     cleanModes,
+                    trimStart: tStart,
+                    trimEnd:   tEnd,
+                    modeStr:   modeStr,
+                    trimStr:   trimStr
+                }
+            );
+            notifSent = !!(notifRes && notifRes.success);
+        }
+
         return {
-            success:   true,
-            message:   "Song settings updated.",
-            songId:    uSongId,
-            modes:     cleanModes,
-            trimStart: tStart,
-            trimEnd:   tEnd
+            success:          true,
+            message:          "Song settings updated.",
+            songId:           uSongId,
+            modes:            cleanModes,
+            trimStart:        tStart,
+            trimEnd:          tEnd,
+            ownerId:          targetSongOwnerId,
+            notificationSent: notifSent
         };
     }
 
@@ -1981,11 +2022,14 @@ handlers.adminUserWorkflow = function (args, context) {
     }
 
     // ====================================================================================
-    // E. BAN USER — accepts email OR playFabId + sends notification
+    // E. BAN USER — accepts email OR playFabId, durationDays (0 = permanent) + sends notification
     // ====================================================================================
     if (action === "banUser") {
-        var bEmail = args.email     || "";
-        var bPfId  = args.playFabId || "";
+        var bEmail       = args.email     || "";
+        var bPfId        = args.playFabId || "";
+        var durationDays = args.durationDays !== undefined ? parseInt(args.durationDays, 10) : 0;
+        if (isNaN(durationDays) || durationDays < 0) durationDays = 0;
+        var bReason      = args.reason    || "Banned via Kangi Admin Dashboard";
         var bId    = "";
         var bName  = "";
 
@@ -2006,29 +2050,74 @@ handlers.adminUserWorkflow = function (args, context) {
             return { success: false, error: "Email or PlayFabId is required." };
         }
 
+        var expiryIso = "";
+        var banDurationHours = 87600; // default permanent (10 years)
+        var notifMsg = "";
+
+        if (durationDays > 0) {
+            var nowMs = new Date().getTime();
+            var expiryMs = nowMs + (durationDays * 24 * 60 * 60 * 1000);
+            var expiryDate = new Date(expiryMs);
+            expiryIso = expiryDate.toISOString();
+            banDurationHours = durationDays * 24;
+            notifMsg = "Your account has been suspended for " + durationDays + " day" + (durationDays > 1 ? "s" : "") + " (until " + expiryIso + ").";
+        } else {
+            notifMsg = "Your account has been permanently suspended. Please contact support for assistance.";
+        }
+
         server.UpdateUserData({
             PlayFabId:  bId,
-            Data:       { "IsBanned": "true", "IsAdmin": "false" },
+            Data: {
+                "IsBanned":        "true",
+                "IsAdmin":         "false",
+                "BannedUntil":     expiryIso,
+                "BanExpiry":       expiryIso,
+                "SuspendedUntil":  expiryIso,
+                "BanExpiresAt":    expiryIso,
+                "BanDurationDays": durationDays.toString(),
+                "BanReason":       bReason
+            },
             Permission: "Public"
         });
 
-        try { server.BanUsers({ Bans: [{ PlayFabId: bId, Reason: "Banned via Kangi Admin Dashboard", DurationInHours: 87600 }] }); } catch (e) {}
+        try {
+            server.BanUsers({
+                Bans: [{
+                    PlayFabId: bId,
+                    Reason: bReason,
+                    DurationInHours: banDurationHours
+                }]
+            });
+        } catch (e) {}
 
-        // Send notification to user
+        // Send rich notification to user
         sendNotification(
             bId,
             "Account Suspended",
-            "Your account has been temporarily suspended. Please contact support for more information.",
+            notifMsg,
             "ban",
-            { reason: "Banned via Kangi Admin Dashboard" }
+            {
+                reason:       bReason,
+                durationDays: durationDays.toString(),
+                bannedUntil:  expiryIso,
+                expiry:       expiryIso
+            }
         );
 
-        return { success: true, message: "User banned.", playFabId: bId, displayName: bName, email: bEmail };
+        return {
+            success:      true,
+            message:      "User banned " + (durationDays > 0 ? "for " + durationDays + " days" : "permanently") + ".",
+            playFabId:    bId,
+            displayName:  bName,
+            email:        bEmail,
+            durationDays: durationDays,
+            bannedUntil:  expiryIso
+        };
     }
 
     // ====================================================================================
     // F. UNBAN USER — accepts email OR playFabId + sends notification
-    //    Removes IsBanned from UserData AND revokes PlayFab native ban
+    //    Removes IsBanned & expiry from UserData AND revokes PlayFab native ban
     // ====================================================================================
     if (action === "unbanUser") {
         var uEmail = args.email     || "";
@@ -2047,10 +2136,18 @@ handlers.adminUserWorkflow = function (args, context) {
             return { success: false, error: "Email or PlayFabId is required." };
         }
 
-        // 1. Clear IsBanned flag in UserData
+        // 1. Clear IsBanned flag and expiry dates in UserData
         server.UpdateUserData({
             PlayFabId:  uId,
-            Data:       { "IsBanned": "false" },
+            Data: {
+                "IsBanned":        "false",
+                "BannedUntil":     "",
+                "BanExpiry":       "",
+                "SuspendedUntil":  "",
+                "BanExpiresAt":    "",
+                "BanDurationDays": "",
+                "BanReason":       ""
+            },
             Permission: "Public"
         });
 
@@ -2151,6 +2248,45 @@ handlers.adminUserWorkflow = function (args, context) {
             return { success: true, unlockedCharacters: chars };
         } catch (e) {
             return { success: false, unlockedCharacters: [], error: e.message || "Failed to read player data." };
+        }
+    }
+
+    // ====================================================================================
+    // H. APP CONFIGURATION (ShowLogs In-Game Console Remote Toggle)
+    // ====================================================================================
+    if (action === "getAppConfig") {
+        try {
+            var titleDataRes = server.GetTitleData({ Keys: ["ShowLogs", "AppConfig"] });
+            var showLogs = false;
+            if (titleDataRes && titleDataRes.Data) {
+                if (titleDataRes.Data["ShowLogs"] !== undefined && titleDataRes.Data["ShowLogs"] !== null) {
+                    var valStr = String(titleDataRes.Data["ShowLogs"]).toLowerCase().trim();
+                    showLogs = (valStr === "true" || valStr === "1");
+                } else if (titleDataRes.Data["AppConfig"]) {
+                    try {
+                        var parsedCfg = JSON.parse(titleDataRes.Data["AppConfig"]);
+                        if (parsedCfg.ShowLogs !== undefined) {
+                            showLogs = (parsedCfg.ShowLogs === true || String(parsedCfg.ShowLogs).toLowerCase() === "true");
+                        }
+                    } catch (eJson) {}
+                }
+            }
+            return { success: true, showLogs: showLogs };
+        } catch (e) {
+            return { success: false, showLogs: false, error: e.message || "Failed to get title data." };
+        }
+    }
+
+    if (action === "setShowLogs" || action === "setAppConfig") {
+        try {
+            var isEnabled = (args.showLogs === true || args.showLogs === "true" || args.ShowLogs === true || args.ShowLogs === "true");
+            server.SetTitleData({
+                Key: "ShowLogs",
+                Value: isEnabled ? "true" : "false"
+            });
+            return { success: true, showLogs: isEnabled, message: "ShowLogs flag updated to " + isEnabled };
+        } catch (e) {
+            return { success: false, error: e.message || "Failed to set title data." };
         }
     }
 
