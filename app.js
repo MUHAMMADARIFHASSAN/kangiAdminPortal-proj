@@ -100,6 +100,8 @@
     userModalActionsBar:$('userModalActionsBar'),
     modalMakeAdminBtn:  $('modalMakeAdminBtn'),
     modalRevokeAdminBtn:$('modalRevokeAdminBtn'),
+    modalShowLogsBtn:   $('modalShowLogsBtn'),
+    modalHideLogsBtn:   $('modalHideLogsBtn'),
     modalUnbanBtn:      $('modalUnbanBtn'),
     modalNotifInput:    $('modalNotifInput'),
     modalSendNotifBtn:  $('modalSendNotifBtn'),
@@ -1903,6 +1905,7 @@
         <div class="user-card-name">
           ${_esc(friendlyName)}
           ${user.isAdmin  ? `<span class="chip chip--purple" style="font-size:0.65rem;">Admin</span>`  : ''}
+          ${user.showLogs ? `<span class="chip chip--teal"   style="font-size:0.65rem;">Logs: ON</span>` : ''}
           ${user.isBanned ? `<span class="chip chip--red"    style="font-size:0.65rem;">Banned</span>` : ''}
         </div>
         <div class="user-card-meta">
@@ -2073,6 +2076,40 @@
       });
     });
 
+    /* ── Show Logs (User In-Game Debug Console) ── */
+    el.modalShowLogsBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, playFabId, displayName } = state.selectedUser;
+      await _modalAction(async () => {
+        const res = await KangiService.setUserShowLogs(email, playFabId, true);
+        if (res && res.success) {
+          state.selectedUser.showLogs = true;
+          _modalAlert('success', `✓ In-game console logs ENABLED for ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to enable logs.');
+        }
+      });
+    });
+
+    /* ── Hide Logs (User In-Game Debug Console) ── */
+    el.modalHideLogsBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, playFabId, displayName } = state.selectedUser;
+      await _modalAction(async () => {
+        const res = await KangiService.setUserShowLogs(email, playFabId, false);
+        if (res && res.success) {
+          state.selectedUser.showLogs = false;
+          _modalAlert('success', `✓ In-game console logs HIDDEN for ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to hide logs.');
+        }
+      });
+    });
+
     /* ── Make Premium ── */
     el.modalMakePremiumBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
@@ -2179,6 +2216,7 @@
   async function _modalAction(fn) {
     const btns = [
       el.modalMakeAdminBtn, el.modalRevokeAdminBtn,
+      el.modalShowLogsBtn, el.modalHideLogsBtn,
       el.modalUnbanBtn, el.modalSendNotifBtn,
       ...(el.userModalActionsBar
           ? [...el.userModalActionsBar.querySelectorAll('[data-modal-ban]')]
@@ -2208,6 +2246,14 @@
     // Admin buttons
     el.modalMakeAdminBtn.style.display   = (!user.isAdmin && !user.isBanned && user.email) ? '' : 'none';
     el.modalRevokeAdminBtn.style.display = (user.isAdmin  && user.email) ? '' : 'none';
+
+    // Show / Hide Logs buttons
+    if (el.modalShowLogsBtn) {
+      el.modalShowLogsBtn.style.display = (!user.showLogs && !user.isBanned && user.email) ? '' : 'none';
+    }
+    if (el.modalHideLogsBtn) {
+      el.modalHideLogsBtn.style.display = (user.showLogs && user.email) ? '' : 'none';
+    }
 
     // Premium toggles — a banned user cannot be granted upload access
     if (el.modalMakePremiumBtn) {
@@ -2253,6 +2299,9 @@
       if (user.playFabId) {
         pfDetails = await KangiService.getPlayFabUserDetails(user.playFabId);
         user.unlockedCharacters = pfDetails.unlockedCharacters || [];
+        if (pfDetails.isAdmin !== undefined)  user.isAdmin  = pfDetails.isAdmin;
+        if (pfDetails.showLogs !== undefined) user.showLogs = pfDetails.showLogs;
+        if (pfDetails.isPremium !== undefined) user.isPremium = pfDetails.isPremium;
       }
     } catch (pfErr) {
       console.warn('[DWM] PlayFab internal fetch notice:', pfErr);
@@ -2275,6 +2324,7 @@
           <span class="up-hero-email">${_esc(user.email || 'No email')}</span>
           <div class="up-hero-badges">
             ${user.isAdmin  ? '<span class="chip chip--purple">Admin</span>'  : ''}
+            ${user.showLogs ? '<span class="chip chip--teal">Logs: ON</span>' : ''}
             ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
             <span class="chip chip--teal" style="font-size:0.65rem;">PlayFab Connected</span>
           </div>

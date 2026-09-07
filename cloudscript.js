@@ -1960,7 +1960,65 @@ handlers.adminUserWorkflow = function (args, context) {
     }
 
     // ====================================================================================
-    // D2. PREMIUM — grant/revoke music upload access. Sets IsPremium in UserData.
+    // D1. SET USER SHOW LOGS — Toggle ShowLogs in player UserData (for in-game debug console)
+    // ====================================================================================
+    if (action === "setUserShowLogs" || action === "toggleUserLogs") {
+        var logEmail  = args.email     || "";
+        var logPfId   = args.playFabId || "";
+        var showLogsVal = (args.showLogs === true || args.showLogs === "true" || args.ShowLogs === true || args.ShowLogs === "true");
+        var logTargetId = "";
+
+        if (logPfId) {
+            logTargetId = logPfId;
+        } else if (logEmail) {
+            try {
+                var logLookup = server.GetUserAccountInfo({ Email: logEmail });
+                if (!logLookup || !logLookup.UserInfo) return { success: false, error: "No account found." };
+                logTargetId = logLookup.UserInfo.PlayFabId;
+            } catch (e) { return { success: false, error: "No account found with that email." }; }
+        } else {
+            return { success: false, error: "Email or PlayFabId is required." };
+        }
+
+        server.UpdateUserData({
+            PlayFabId:  logTargetId,
+            Data:       { "ShowLogs": showLogsVal ? "true" : "false" },
+            Permission: "Public"
+        });
+
+        return {
+            success: true,
+            message: "ShowLogs " + (showLogsVal ? "enabled" : "disabled") + " for user.",
+            playFabId: logTargetId,
+            showLogs: showLogsVal
+        };
+    }
+
+    // ====================================================================================
+    // D2. GET USER DATA FLAGS — Query IsAdmin, ShowLogs, IsPremium from UserData
+    // ====================================================================================
+    if (action === "getUserDataFlags") {
+        var uPfId = args.playFabId || "";
+        if (!uPfId) return { success: false, isAdmin: false, showLogs: false, isPremium: false };
+        try {
+            var uDataRes = server.GetUserData({ PlayFabId: uPfId, Keys: ["IsAdmin", "ShowLogs", "showLogs", "IsPremium"] });
+            var uIsAdmin = false;
+            var uShowLogs = false;
+            var uIsPremium = false;
+            if (uDataRes && uDataRes.Data) {
+                if (uDataRes.Data.IsAdmin && (uDataRes.Data.IsAdmin.Value === "true" || uDataRes.Data.IsAdmin.Value === "1")) uIsAdmin = true;
+                if (uDataRes.Data.IsPremium && (uDataRes.Data.IsPremium.Value === "true" || uDataRes.Data.IsPremium.Value === "1")) uIsPremium = true;
+                var slVal = uDataRes.Data.ShowLogs ? uDataRes.Data.ShowLogs.Value : (uDataRes.Data.showLogs ? uDataRes.Data.showLogs.Value : "");
+                if (slVal && (slVal.toLowerCase() === "true" || slVal === "1")) uShowLogs = true;
+            }
+            return { success: true, isAdmin: uIsAdmin, showLogs: uShowLogs, isPremium: uIsPremium };
+        } catch (e) {
+            return { success: false, isAdmin: false, showLogs: false, isPremium: false };
+        }
+    }
+
+    // ====================================================================================
+    // D3. PREMIUM — grant/revoke music upload access. Sets IsPremium in UserData.
     //     Permission "Public" matches IsAdmin/IsBanned so the Unity client can read
     //     it back through PlayFabClientAPI.GetUserData.
     // ====================================================================================

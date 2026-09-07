@@ -712,8 +712,8 @@
     <div class="user-panel-footer" id="userModalActionsBar" style="display:none;">
 
       <!-- Admin toggles -->
-      <div class="upf-section-label">Admin Access</div>
-      <div class="upf-row">
+      <div class="upf-section-label">Admin Access &amp; Debug Console</div>
+      <div class="upf-row" style="margin-bottom: 0.5rem;">
         <button class="upf-btn upf-btn--green" id="modalMakeAdminBtn">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
           <span>Make Admin</span>
@@ -721,6 +721,16 @@
         <button class="upf-btn upf-btn--ghost" id="modalRevokeAdminBtn">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>
           <span>Revoke Admin</span>
+        </button>
+      </div>
+      <div class="upf-row">
+        <button class="upf-btn upf-btn--green" id="modalShowLogsBtn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/></svg>
+          <span>Show Logs</span>
+        </button>
+        <button class="upf-btn upf-btn--ghost" id="modalHideLogsBtn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>
+          <span>Hide Logs</span>
         </button>
       </div>
 

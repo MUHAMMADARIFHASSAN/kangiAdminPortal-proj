@@ -229,6 +229,16 @@ const KangiService = (function () {
   /* Revoke admin role — accepts email or playFabId */
   function revokeAdmin(email, playFabId) { return _callAdminScript('revokeAdmin', { email: email || '', playFabId: playFabId || '' }); }
 
+  /* Toggle ShowLogs for a specific user — accepts email or playFabId */
+  function setUserShowLogs(email, playFabId, showLogs) {
+    return _callAdminScript('setUserShowLogs', { email: email || '', playFabId: playFabId || '', showLogs: !!showLogs });
+  }
+
+  /* Query user data flags (IsAdmin, ShowLogs, IsPremium) */
+  function getUserDataFlags(playFabId) {
+    return _callAdminScript('getUserDataFlags', { playFabId: playFabId || '' });
+  }
+
   /* Register current user — no-op acknowledgment, kept for compatibility */
   function registerUser() {
     return _callAdminScript('registerUser', {
@@ -819,9 +829,10 @@ const KangiService = (function () {
     }
 
     try {
-      const [charRes, notifRes] = await Promise.allSettled([
+      const [charRes, notifRes, flagRes] = await Promise.allSettled([
         getUserCharacters(playFabId),
-        getNotifications(playFabId)
+        getNotifications(playFabId),
+        getUserDataFlags(playFabId)
       ]);
 
       const unlockedCharacters = (charRes.status === 'fulfilled' && charRes.value && Array.isArray(charRes.value.unlockedCharacters))
@@ -832,11 +843,16 @@ const KangiService = (function () {
         ? notifRes.value.notifications
         : [];
 
+      const flags = (flagRes.status === 'fulfilled' && flagRes.value) ? flagRes.value : {};
+
       return {
         success: true,
         playFabId,
         unlockedCharacters,
-        notifications
+        notifications,
+        isAdmin: !!flags.isAdmin,
+        showLogs: !!flags.showLogs,
+        isPremium: !!flags.isPremium
       };
     } catch (err) {
       console.error('[PlayFab] Error fetching internal details for', playFabId, err);
@@ -845,6 +861,9 @@ const KangiService = (function () {
         playFabId,
         unlockedCharacters: [],
         notifications: [],
+        isAdmin: false,
+        showLogs: false,
+        isPremium: false,
         error: err?.message || 'Failed to fetch PlayFab internal data.'
       };
     }
@@ -867,6 +886,8 @@ const KangiService = (function () {
     updateSongSettings,
     makeAdmin,
     revokeAdmin,
+    setUserShowLogs,
+    getUserDataFlags,
     registerUser,
     getAllUsers,
     getExportResult,
