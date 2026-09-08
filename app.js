@@ -333,7 +333,7 @@
           const res = await KangiService.setShowLogs(targetState);
           if (res && res.success) {
             _updateShowLogsUI(targetState);
-            _alert(el.appConfigAlert, 'success', `✓ In-game console logs ${targetState ? 'ENABLED' : 'DISABLED'} successfully in PlayFab Title Data.`);
+            _alert(el.appConfigAlert, 'success', `✓ In-game console logs ${targetState ? 'ENABLED' : 'DISABLED'} successfully in database Title Data.`);
             setTimeout(() => _hideEl(el.appConfigAlert), 4000);
           } else {
             throw new Error(res?.error || 'Failed to update ShowLogs setting');
@@ -1824,7 +1824,7 @@
         fbStatusEl.textContent = `● Connected (dance-withmii · ${result.collection || 'users'})`;
         fbStatusEl.className   = 'badge badge-success';
       } else {
-        fbStatusEl.textContent = `● PlayFab Fallback`;
+        fbStatusEl.textContent = `● Database Fallback`;
         fbStatusEl.className   = 'badge badge-teal';
       }
     }
@@ -1832,7 +1832,7 @@
       if (result.source === 'firebase') {
         dsEl.textContent = `Firebase (${result.collection || 'users'}) — ${users.length} player${users.length !== 1 ? 's' : ''}`;
       } else {
-        dsEl.textContent = `PlayFab Live Registry — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+        dsEl.textContent = `Database Live Registry — ${users.length} player${users.length !== 1 ? 's' : ''}`;
       }
     }
 
@@ -1924,7 +1924,7 @@
         </div>
       </div>
       <div class="user-card-actions">
-        <button class="btn btn-secondary btn-xs btn-view-more" title="View details via PlayFab API">
+        <button class="btn btn-secondary btn-xs btn-view-more" title="View details via Database API">
           <span>View More</span>
           <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;margin-left:3px;">
             <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
@@ -2297,7 +2297,7 @@
     el.userDetailsBody.innerHTML = `
       <div class="loading-spinner">
         <div class="btn-loader"></div>
-        <p>Querying PlayFab API for player internal data…</p>
+        <p>Querying Database API for player internal data…</p>
       </div>`;
 
     if (el.userModalActionsBar) el.userModalActionsBar.style.display = 'none';
@@ -2349,14 +2349,14 @@
             ${user.showLogs ? '<span class="chip chip--teal">Logs: ON</span>' : ''}
             ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
             ${user.isBanned && user.bannedUntil ? `<span class="chip chip--orange" style="font-size:0.65rem;">Until: ${new Date(user.bannedUntil).toLocaleDateString()}</span>` : ''}
-            <span class="chip chip--teal" style="font-size:0.65rem;">PlayFab Connected</span>
+            <span class="chip chip--teal" style="font-size:0.65rem;">Database Connected</span>
           </div>
         </div>
       </div>
 
       <!-- Account info -->
       <div class="up-section">
-        <div class="up-section-title">Account Information (PlayFab &amp; Firebase)</div>
+        <div class="up-section-title">Account Information (Database &amp; Firebase)</div>
         <div class="up-info-grid">
           <div class="up-info-item">
             <span class="up-info-label">Player Name</span>

@@ -30,7 +30,7 @@
         </div>
         <div class="auth-brand-headline">
           <h2>Explore TCG QR &amp; Audio collections in one place.</h2>
-          <p>Kangi Admin Dashboard gives you instant access to PlayFab TCG batches, unique QR code redemptions, and music sound approvals.</p>
+          <p>Dance With Mii! Admin Dashboard gives you instant access to database TCG batches, unique QR code redemptions, and music sound approvals.</p>
         </div>
         <div class="auth-brand-footer">
           <span class="auth-brand-badge">● Dance With Mii! Virtual Assets Dashboard</span>
@@ -195,12 +195,12 @@
         </div>
 
         <div class="dash-grid">
-          <!-- REGISTERED PLAYERS (LIVE PLAYFAB) -->
+          <!-- REGISTERED PLAYERS (LIVE DATABASE) -->
           <div class="card">
             <div class="card-header card-header--between">
               <div>
                 <h3>Registered Players</h3>
-                <p>Live players registered in PlayFab</p>
+                <p>Live players registered in database</p>
               </div>
               <button class="btn btn-secondary btn-sm" onclick="document.querySelector('[data-view=users]').click()">
                 Manage Users
@@ -210,7 +210,7 @@
             <div id="dashUsersList" class="card-body">
               <div class="empty-state">
                 <div class="btn-loader" style="width:22px;height:22px;border-width:3px;"></div>
-                <p>Loading registered players from PlayFab…</p>
+                <p>Loading registered players from database…</p>
               </div>
             </div>
           </div>
@@ -423,7 +423,7 @@
                   </svg>
                 </button>
               </div>
-              <button id="loadUsersBtn" class="btn btn-primary btn-sm" title="Refresh players directly from PlayFab">
+              <button id="loadUsersBtn" class="btn btn-primary btn-sm" title="Refresh players directly from database">
                 <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;">
                   <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
                 </svg>
@@ -502,7 +502,7 @@
                   <span class="badge badge-purple" id="settingsFrontendVersion">v2.5.0</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">PlayFab CloudScript Version</span>
+                  <span class="detail-label">Database CloudScript Version</span>
                   <span class="badge badge-teal" id="settingsCloudscriptVersion">Checking live revision...</span>
                 </div>
                 <div class="detail-row">
@@ -514,7 +514,7 @@
                   <span class="badge badge-success" id="settingsFirebaseStatus">● Connected (dance-withmii)</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">PlayFab Title ID</span>
+                  <span class="detail-label">Database Title ID</span>
                   <span class="detail-value">182E5E (Dance With Mii! App)</span>
                 </div>
                 <div class="detail-row">
@@ -535,7 +535,7 @@
             </div>
             <div class="settings-card-body">
               <p class="setting-desc" style="margin-bottom: 1.25rem; color: var(--text-2);">
-                Global game settings synced across all Unity clients via PlayFab Title Data.
+                Global game settings synced across all Unity clients via Database Title Data.
               </p>
 
               <div id="appConfigAlert" class="alert hidden" style="margin-bottom: 1rem;"></div>
@@ -569,7 +569,7 @@
             </div>
             <div class="settings-card-body">
               <p class="setting-desc" style="margin-bottom: 1rem; color: var(--text-2);">
-                Admin fetches player documents from Firebase and renders them sorted by name. Clicking <strong>View More</strong> queries the PlayFab API on-demand for internal profile and character data.
+                Admin fetches player documents from Firebase and renders them sorted by name. Clicking <strong>View More</strong> queries the Database API on-demand for internal profile and character data.
               </p>
               
               <div id="firebaseConfigAlert" class="alert hidden" style="margin-bottom: 1rem;"></div>
@@ -651,7 +651,7 @@
               <div class="setting-item">
                 <div>
                   <span class="setting-title">Sync Data</span>
-                  <span class="setting-desc">Reload all PlayFab TCGs &amp; Sounds Library</span>
+                  <span class="setting-desc">Reload all Database TCGs &amp; Sounds Library</span>
                 </div>
                 <button id="settingsRefreshBtn" class="btn btn-secondary btn-sm">Refresh Data</button>
               </div>
