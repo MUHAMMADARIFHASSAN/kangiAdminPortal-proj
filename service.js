@@ -121,17 +121,6 @@ const KangiService = (function () {
             return;
           }
 
-          /* Optional: Trigger Firebase password reset email if firebase auth is available */
-          if (typeof firebase !== 'undefined' && firebase.auth) {
-            try {
-              firebase.auth().sendPasswordResetEmail(cleanEmail).catch(err => {
-                console.log('[Firebase] Password reset notice:', err?.message || err);
-              });
-            } catch (e) {
-              console.log('[Firebase] Password reset notice:', e);
-            }
-          }
-
           resolve({
             success: true,
             message: 'Password reset link has been sent to your email address! Please check your inbox.'
@@ -795,29 +784,54 @@ const KangiService = (function () {
       throw new Error('Firebase SDK is not loaded.');
     }
 
-    await ensureFirebaseAuth(cfg);
+    try {
+      await ensureFirebaseAuth(cfg);
+    } catch (authErr) {
+      console.warn('[Firebase] ensureFirebaseAuth failed, attempting Firestore query / PlayFab fallback:', authErr?.message || authErr);
+    }
 
     const dbType = cfg.dbType || 'firestore';
     const collectionName = (cfg.collectionName || 'users').trim();
     let rawList = [];
 
-    if (dbType === 'rtdb') {
-      const db = firebase.database();
-      const snapshot = await db.ref(collectionName).once('value');
-      const val = snapshot.val();
-      if (val) {
-        if (Array.isArray(val)) {
-          rawList = val.filter(Boolean);
-        } else if (typeof val === 'object') {
-          rawList = Object.keys(val).map(key => ({ _fbKey: key, ...val[key] }));
+    try {
+      if (dbType === 'rtdb') {
+        const db = firebase.database();
+        const snapshot = await db.ref(collectionName).once('value');
+        const val = snapshot.val();
+        if (val) {
+          if (Array.isArray(val)) {
+            rawList = val.filter(Boolean);
+          } else if (typeof val === 'object') {
+            rawList = Object.keys(val).map(key => ({ _fbKey: key, ...val[key] }));
+          }
         }
+      } else {
+        const db = firebase.firestore();
+        const snapshot = await db.collection(collectionName).get();
+        snapshot.forEach(doc => {
+          rawList.push({ _fbDocId: doc.id, ...doc.data() });
+        });
       }
-    } else {
-      const db = firebase.firestore();
-      const snapshot = await db.collection(collectionName).get();
-      snapshot.forEach(doc => {
-        rawList.push({ _fbDocId: doc.id, ...doc.data() });
-      });
+    } catch (dbErr) {
+      console.warn('[Firebase] Failed to fetch users from Firebase, falling back to PlayFab:', dbErr?.message || dbErr);
+    }
+
+    // If Firebase returned no users, attempt PlayFab fallback
+    if (!rawList.length) {
+      console.log('[Firebase] 0 users in Firebase, falling back to PlayFab live registry.');
+      try {
+        const pfResult = await getAllUsers();
+        if (pfResult && pfResult.status === 'complete' && Array.isArray(pfResult.users) && pfResult.users.length > 0) {
+          return {
+            source: 'playfab-fallback',
+            users: pfResult.users,
+            isFallback: true
+          };
+        }
+      } catch (pfErr) {
+        console.warn('[PlayFab] Fallback user fetch error:', pfErr);
+      }
     }
 
     // Normalize each user record
