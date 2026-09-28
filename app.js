@@ -12,12 +12,19 @@
   /* ─── Element refs ─── */
   const el = {
     /* Auth */
-    loginView:      $('loginView'),
-    loginForm:      $('loginForm'),
-    loginEmail:     $('loginUsername'),
-    loginPass:      $('loginPassword'),
-    loginBtn:       $('loginBtn'),
-    loginAlert:     $('loginAlert'),
+    loginView:             $('loginView'),
+    loginForm:             $('loginForm'),
+    loginEmail:            $('loginUsername'),
+    loginPass:             $('loginPassword'),
+    loginBtn:              $('loginBtn'),
+    loginAlert:            $('loginAlert'),
+    authHeading:           $('authHeading'),
+    authSub:               $('authSub'),
+    showForgotPasswordBtn: $('showForgotPasswordBtn'),
+    forgotPasswordForm:    $('forgotPasswordForm'),
+    forgotEmail:           $('forgotEmail'),
+    forgotBtn:             $('forgotBtn'),
+    backToLoginBtn:        $('backToLoginBtn'),
 
     /* Shell */
     appView:        $('appView'),
@@ -220,6 +227,57 @@
         _setLoading(el.loginBtn, false);
       }
     });
+
+    /* Switch to Forgot Password view */
+    if (el.showForgotPasswordBtn) {
+      el.showForgotPasswordBtn.addEventListener('click', () => {
+        _hideEl(el.loginForm);
+        el.forgotPasswordForm.classList.remove('hidden');
+        if (el.authHeading) el.authHeading.textContent = 'Reset password';
+        if (el.authSub) el.authSub.textContent = 'Enter your registered email address to receive password recovery instructions.';
+        if (el.loginEmail && el.loginEmail.value.trim()) {
+          el.forgotEmail.value = el.loginEmail.value.trim();
+        }
+        _hideEl(el.loginAlert);
+        el.forgotEmail.focus();
+      });
+    }
+
+    /* Switch back to Sign in view */
+    if (el.backToLoginBtn) {
+      el.backToLoginBtn.addEventListener('click', () => {
+        _hideEl(el.forgotPasswordForm);
+        el.loginForm.classList.remove('hidden');
+        if (el.authHeading) el.authHeading.textContent = 'Sign in';
+        if (el.authSub) el.authSub.textContent = 'Enter your credentials to access the dashboard.';
+        _hideEl(el.loginAlert);
+        el.loginEmail.focus();
+      });
+    }
+
+    /* Submit Forgot Password form */
+    if (el.forgotPasswordForm) {
+      el.forgotPasswordForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = el.forgotEmail.value.trim();
+
+        if (!email) {
+          return _alert(el.loginAlert, 'error', 'Please enter your email address.');
+        }
+
+        _setLoading(el.forgotBtn, true);
+        _hideEl(el.loginAlert);
+
+        try {
+          const res = await KangiService.sendAccountRecoveryEmail(email);
+          _alert(el.loginAlert, 'success', res.message || 'Password reset email sent! Check your inbox.');
+        } catch (msg) {
+          _alert(el.loginAlert, 'error', typeof msg === 'string' ? msg : msg?.message || 'Failed to send reset email.');
+        } finally {
+          _setLoading(el.forgotBtn, false);
+        }
+      });
+    }
   }
 
   function _onLoginSuccess(res) {

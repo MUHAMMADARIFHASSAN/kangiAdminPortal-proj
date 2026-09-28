@@ -101,6 +101,46 @@ const KangiService = (function () {
     _clearSession();
   }
 
+  /* ── Send Account Recovery / Password Reset Email ── */
+  function sendAccountRecoveryEmail(email) {
+    return new Promise((resolve, reject) => {
+      if (!email || !email.trim()) {
+        reject('Please enter your email address.');
+        return;
+      }
+      const cleanEmail = email.trim();
+
+      PlayFabClientSDK.SendAccountRecoveryEmail(
+        {
+          TitleId: TITLE_ID,
+          Email: cleanEmail
+        },
+        (result, error) => {
+          if (error) {
+            reject(_friendlyError(error));
+            return;
+          }
+
+          /* Optional: Trigger Firebase password reset email if firebase auth is available */
+          if (typeof firebase !== 'undefined' && firebase.auth) {
+            try {
+              firebase.auth().sendPasswordResetEmail(cleanEmail).catch(err => {
+                console.log('[Firebase] Password reset notice:', err?.message || err);
+              });
+            } catch (e) {
+              console.log('[Firebase] Password reset notice:', e);
+            }
+          }
+
+          resolve({
+            success: true,
+            message: 'Password reset link has been sent to your email address! Please check your inbox.'
+          });
+        }
+      );
+    });
+  }
+
   function _clearSession() {
     session.playFabId   = null;
     session.email       = null;
@@ -880,6 +920,7 @@ const KangiService = (function () {
     init,
     login,
     logout,
+    sendAccountRecoveryEmail,
     session,
     getNfts,
     publishNft,
