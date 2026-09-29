@@ -91,6 +91,34 @@
     btnFilterPendingSongs: $('btnFilterPendingSongs'),
     btnFilterApprovedSongs: $('btnFilterApprovedSongs'),
     soundsAlert:    $('soundsAlert'),
+    /* Upload Music Modal */
+    btnOpenUploadSongModal: $('btnOpenUploadSongModal'),
+    uploadSongModal:        $('uploadSongModal'),
+    closeUploadSongModal:   $('closeUploadSongModal'),
+    cancelUploadSongBtn:    $('cancelUploadSongBtn'),
+    uploadSongForm:         $('uploadSongForm'),
+    uploadSongTitle:        $('uploadSongTitle'),
+    uploadSongArtist:       $('uploadSongArtist'),
+    btnAudioSourceFile:     $('btnAudioSourceFile'),
+    btnAudioSourceUrl:      $('btnAudioSourceUrl'),
+    audioFileInputContainer:$('audioFileInputContainer'),
+    audioUrlInputContainer: $('audioUrlInputContainer'),
+    uploadAudioFile:        $('uploadAudioFile'),
+    uploadAudioUrl:         $('uploadAudioUrl'),
+    audioFileName:          $('audioFileName'),
+    btnCoverSourceFile:     $('btnCoverSourceFile'),
+    btnCoverSourceUrl:      $('btnCoverSourceUrl'),
+    coverFileInputContainer:$('coverFileInputContainer'),
+    coverUrlInputContainer: $('coverUrlInputContainer'),
+    uploadCoverFile:        $('uploadCoverFile'),
+    uploadCoverUrl:         $('uploadCoverUrl'),
+    coverFileName:          $('coverFileName'),
+    uploadModeMirrorMii:    $('uploadModeMirrorMii'),
+    uploadModeKawaii:       $('uploadModeKawaii'),
+    uploadModeDance:        $('uploadModeDance'),
+    uploadSongAutoApprove:  $('uploadSongAutoApprove'),
+    submitUploadSongBtn:    $('submitUploadSongBtn'),
+    uploadSongModalAlert:   $('uploadSongModalAlert'),
 
     /* User Management */
     usersAlert:         $('usersAlert'),
@@ -1148,12 +1176,213 @@
   /* ================================================================
      SOUNDS — Management of Audio Tracks
      ================================================================ */
+  let currentAudioSourceMode = 'file';
+  let currentCoverSourceMode = 'file';
+
   function _bindSounds() {
     if (!el.soundsLibrary) return;
 
     el.btnFilterAllSongs?.addEventListener('click', () => _setSongFilter('all'));
     el.btnFilterPendingSongs?.addEventListener('click', () => _setSongFilter('pending'));
     el.btnFilterApprovedSongs?.addEventListener('click', () => _setSongFilter('approved'));
+
+    _bindUploadMusicModal();
+  }
+
+  function _bindUploadMusicModal() {
+    if (!el.btnOpenUploadSongModal || !el.uploadSongModal) return;
+
+    // Open Modal
+    el.btnOpenUploadSongModal.addEventListener('click', () => {
+      _resetUploadSongModal();
+      el.uploadSongModal.classList.remove('hidden');
+    });
+
+    // Close Modal
+    el.closeUploadSongModal?.addEventListener('click', () => {
+      el.uploadSongModal.classList.add('hidden');
+    });
+    el.cancelUploadSongBtn?.addEventListener('click', () => {
+      el.uploadSongModal.classList.add('hidden');
+    });
+    el.uploadSongModal.querySelector('.modal-overlay')?.addEventListener('click', () => {
+      el.uploadSongModal.classList.add('hidden');
+    });
+
+    // Audio Source Toggle
+    el.btnAudioSourceFile?.addEventListener('click', () => {
+      currentAudioSourceMode = 'file';
+      el.btnAudioSourceFile.classList.add('active');
+      el.btnAudioSourceFile.style.background = 'var(--pink)';
+      el.btnAudioSourceFile.style.color = '#fff';
+      el.btnAudioSourceUrl?.classList.remove('active');
+      if (el.btnAudioSourceUrl) {
+        el.btnAudioSourceUrl.style.background = 'transparent';
+        el.btnAudioSourceUrl.style.color = 'var(--text-muted)';
+      }
+      el.audioFileInputContainer?.classList.remove('hidden');
+      el.audioUrlInputContainer?.classList.add('hidden');
+    });
+
+    el.btnAudioSourceUrl?.addEventListener('click', () => {
+      currentAudioSourceMode = 'url';
+      el.btnAudioSourceUrl.classList.add('active');
+      el.btnAudioSourceUrl.style.background = 'var(--pink)';
+      el.btnAudioSourceUrl.style.color = '#fff';
+      el.btnAudioSourceFile?.classList.remove('active');
+      if (el.btnAudioSourceFile) {
+        el.btnAudioSourceFile.style.background = 'transparent';
+        el.btnAudioSourceFile.style.color = 'var(--text-muted)';
+      }
+      el.audioUrlInputContainer?.classList.remove('hidden');
+      el.audioFileInputContainer?.classList.add('hidden');
+    });
+
+    // Cover Source Toggle
+    el.btnCoverSourceFile?.addEventListener('click', () => {
+      currentCoverSourceMode = 'file';
+      el.btnCoverSourceFile.classList.add('active');
+      el.btnCoverSourceFile.style.background = 'var(--pink)';
+      el.btnCoverSourceFile.style.color = '#fff';
+      el.btnCoverSourceUrl?.classList.remove('active');
+      if (el.btnCoverSourceUrl) {
+        el.btnCoverSourceUrl.style.background = 'transparent';
+        el.btnCoverSourceUrl.style.color = 'var(--text-muted)';
+      }
+      el.coverFileInputContainer?.classList.remove('hidden');
+      el.coverUrlInputContainer?.classList.add('hidden');
+    });
+
+    el.btnCoverSourceUrl?.addEventListener('click', () => {
+      currentCoverSourceMode = 'url';
+      el.btnCoverSourceUrl.classList.add('active');
+      el.btnCoverSourceUrl.style.background = 'var(--pink)';
+      el.btnCoverSourceUrl.style.color = '#fff';
+      el.btnCoverSourceFile?.classList.remove('active');
+      if (el.btnCoverSourceFile) {
+        el.btnCoverSourceFile.style.background = 'transparent';
+        el.btnCoverSourceFile.style.color = 'var(--text-muted)';
+      }
+      el.coverUrlInputContainer?.classList.remove('hidden');
+      el.coverFileInputContainer?.classList.add('hidden');
+    });
+
+    // File selection label updates
+    el.uploadAudioFile?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (el.audioFileName) {
+        el.audioFileName.textContent = file ? file.name : 'Select MP3, WAV, M4A, OGG file';
+      }
+    });
+
+    el.uploadCoverFile?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (el.coverFileName) {
+        el.coverFileName.textContent = file ? file.name : 'Select PNG, JPG artwork';
+      }
+    });
+
+    // Form Submit Handler
+    el.uploadSongForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      _hideAlert(el.uploadSongModalAlert);
+
+      const title = el.uploadSongTitle?.value.trim();
+      const artist = el.uploadSongArtist?.value.trim() || 'Dashboard Admin';
+
+      if (!title) {
+        _alert(el.uploadSongModalAlert, 'error', 'Please enter a Song Title.');
+        return;
+      }
+
+      let audioUrl = '';
+      if (currentAudioSourceMode === 'file') {
+        const audioFile = el.uploadAudioFile?.files[0];
+        if (!audioFile) {
+          _alert(el.uploadSongModalAlert, 'error', 'Please select an audio file to upload or switch to Audio URL.');
+          return;
+        }
+        _setFormLoading(el.submitUploadSongBtn, true, 'Uploading Audio…');
+        const uploadRes = await KangiService.uploadToCloudinary(audioFile, 'auto');
+        if (!uploadRes.success) {
+          _setFormLoading(el.submitUploadSongBtn, false);
+          _alert(el.uploadSongModalAlert, 'error', uploadRes.error || 'Audio upload failed. Check Cloudinary settings.');
+          return;
+        }
+        audioUrl = uploadRes.url;
+      } else {
+        audioUrl = el.uploadAudioUrl?.value.trim();
+        if (!audioUrl) {
+          _alert(el.uploadSongModalAlert, 'error', 'Please enter a valid Audio URL.');
+          return;
+        }
+      }
+
+      let coverUrl = '';
+      if (currentCoverSourceMode === 'file') {
+        const coverFile = el.uploadCoverFile?.files[0];
+        if (coverFile) {
+          _setFormLoading(el.submitUploadSongBtn, true, 'Uploading Cover Art…');
+          const coverRes = await KangiService.uploadToCloudinary(coverFile, 'image');
+          if (coverRes.success) {
+            coverUrl = coverRes.url;
+          }
+        }
+      } else {
+        coverUrl = el.uploadCoverUrl?.value.trim() || '';
+      }
+
+      // Collect game modes
+      const modes = [];
+      if (el.uploadModeMirrorMii?.checked) modes.push('mirror_mii');
+      if (el.uploadModeKawaii?.checked) modes.push('kawaii_mode');
+      if (el.uploadModeDance?.checked) modes.push('dance_challenge');
+
+      const isPending = !el.uploadSongAutoApprove?.checked;
+
+      const songData = {
+        SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        SongName: title,
+        Singer: artist,
+        SongUrl: audioUrl,
+        AvatarUrl: coverUrl,
+        modes: modes.length ? modes : ['mirror_mii', 'kawaii_mode'],
+        trimStart: 0,
+        trimEnd: 0,
+        isPending: isPending,
+        uploaderId: 'Admin',
+        uploaderName: 'Dashboard Admin'
+      };
+
+      _setFormLoading(el.submitUploadSongBtn, true, 'Saving Song…');
+
+      try {
+        const res = await KangiService.addSong(songData);
+        _setFormLoading(el.submitUploadSongBtn, false);
+
+        if (res && res.success !== false) {
+          _alert(el.uploadSongModalAlert, 'success', '🎵 Song successfully uploaded and added to library!');
+          setTimeout(() => {
+            el.uploadSongModal.classList.add('hidden');
+            _loadSongsData();
+          }, 1200);
+        } else {
+          _alert(el.uploadSongModalAlert, 'error', res?.error || res?.message || 'Failed to save song to server.');
+        }
+      } catch (err) {
+        _setFormLoading(el.submitUploadSongBtn, false);
+        _alert(el.uploadSongModalAlert, 'error', err?.message || err || 'Failed to save song to server.');
+      }
+    });
+  }
+
+  function _resetUploadSongModal() {
+    _hideAlert(el.uploadSongModalAlert);
+    if (el.uploadSongForm) el.uploadSongForm.reset();
+    if (el.audioFileName) el.audioFileName.textContent = 'Select MP3, WAV, M4A, OGG file';
+    if (el.coverFileName) el.coverFileName.textContent = 'Select PNG, JPG artwork';
+    el.btnAudioSourceFile?.click();
+    el.btnCoverSourceFile?.click();
   }
 
   function _setSongFilter(filter) {

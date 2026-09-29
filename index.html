@@ -381,9 +381,13 @@
           <div class="card-header card-header--between">
             <div>
               <h3>Sounds Library</h3>
-              <p>Approve or delete audio files submitted to the server.</p>
+              <p>Approve, trim, or upload audio files to the server.</p>
             </div>
-            <div style="display:flex;gap:0.5rem;align-items:center;">
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" id="btnOpenUploadSongModal" style="display:inline-flex;align-items:center;gap:0.35rem;">
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+                Upload Music
+              </button>
               <button class="btn btn-ghost btn-sm active" id="btnFilterAllSongs">All Sounds</button>
               <button class="btn btn-ghost btn-sm" id="btnFilterPendingSongs">Pending</button>
               <button class="btn btn-ghost btn-sm" id="btnFilterApprovedSongs">Available</button>
@@ -850,6 +854,132 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" id="cancelBanBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- Upload Music Modal -->
+<div id="uploadSongModal" class="modal hidden">
+  <div class="modal-overlay"></div>
+  <div class="modal-content song-upload-modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:0.6rem;">
+        <div style="width:36px;height:36px;border-radius:8px;background:rgba(236,72,153,0.15);color:var(--pink);display:grid;place-items:center;flex-shrink:0;">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+        </div>
+        <div>
+          <h3 style="margin:0;font-size:1.1rem;">Upload Music Track</h3>
+          <p style="margin:0.15rem 0 0;font-size:0.8rem;color:var(--text-muted);">Add new songs directly to the global music catalog</p>
+        </div>
+      </div>
+      <button class="modal-close" id="closeUploadSongModal" title="Close">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" style="padding-top:0.85rem;">
+      <div id="uploadSongModalAlert" class="alert hidden"></div>
+
+      <form id="uploadSongForm">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+          <div class="field-group">
+            <label for="uploadSongTitle">Song Title <span style="color:var(--pink);">*</span></label>
+            <input id="uploadSongTitle" type="text" placeholder="e.g. Summer Vibe" required />
+          </div>
+
+          <div class="field-group">
+            <label for="uploadSongArtist">Artist / Singer Name</label>
+            <input id="uploadSongArtist" type="text" placeholder="e.g. Kangi Studio" />
+          </div>
+        </div>
+
+        <!-- Audio Source Toggle & Inputs -->
+        <div class="field-group" style="margin-top:0.75rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+            <label style="margin:0;">Audio Track Source <span style="color:var(--pink);">*</span></label>
+            <div class="tab-toggle" style="display:flex;background:rgba(255,255,255,0.06);padding:2px;border-radius:6px;gap:2px;">
+              <button type="button" class="btn-toggle-src active" id="btnAudioSourceFile" style="border:none;background:var(--pink);color:#fff;padding:0.25rem 0.6rem;border-radius:4px;font-size:0.75rem;cursor:pointer;font-weight:600;">Upload File</button>
+              <button type="button" class="btn-toggle-src" id="btnAudioSourceUrl" style="border:none;background:transparent;color:var(--text-muted);padding:0.25rem 0.6rem;border-radius:4px;font-size:0.75rem;cursor:pointer;">Audio URL</button>
+            </div>
+          </div>
+
+          <!-- File Upload Option -->
+          <div id="audioFileInputContainer">
+            <div class="file-input-bar" id="audioFileDrop">
+              <input id="uploadAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" class="file-input" />
+              <div class="file-input-content">
+                <span class="btn-choose-file">Choose Audio File</span>
+                <span id="audioFileName" class="file-name-text">Select MP3, WAV, M4A, OGG file</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- URL Input Option -->
+          <div id="audioUrlInputContainer" class="hidden" style="margin-top:0.25rem;">
+            <input id="uploadAudioUrl" type="url" placeholder="https://cdn.example.com/music/track.mp3" />
+          </div>
+        </div>
+
+        <!-- Cover Image Input (Optional) -->
+        <div class="field-group" style="margin-top:0.75rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+            <label style="margin:0;">Cover Artwork <span class="optional">(optional)</span></label>
+            <div class="tab-toggle" style="display:flex;background:rgba(255,255,255,0.06);padding:2px;border-radius:6px;gap:2px;">
+              <button type="button" class="btn-toggle-cover active" id="btnCoverSourceFile" style="border:none;background:var(--pink);color:#fff;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.7rem;cursor:pointer;font-weight:600;">File</button>
+              <button type="button" class="btn-toggle-cover" id="btnCoverSourceUrl" style="border:none;background:transparent;color:var(--text-muted);padding:0.2rem 0.5rem;border-radius:4px;font-size:0.7rem;cursor:pointer;">URL</button>
+            </div>
+          </div>
+
+          <div id="coverFileInputContainer">
+            <div class="file-input-bar" id="coverFileDrop">
+              <input id="uploadCoverFile" type="file" accept="image/*" class="file-input" />
+              <div class="file-input-content">
+                <span class="btn-choose-file">Choose Image</span>
+                <span id="coverFileName" class="file-name-text">Select PNG, JPG artwork</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="coverUrlInputContainer" class="hidden" style="margin-top:0.25rem;">
+            <input id="uploadCoverUrl" type="url" placeholder="https://cdn.example.com/images/cover.jpg" />
+          </div>
+        </div>
+
+        <!-- Available Game Modes -->
+        <div class="field-group" style="margin-top:0.75rem;">
+          <label style="margin-bottom:0.35rem;display:block;">Game Modes Availability</label>
+          <div style="display:flex;gap:0.9rem;flex-wrap:wrap;background:rgba(255,255,255,0.03);padding:0.6rem 0.8rem;border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;">
+              <input type="checkbox" id="uploadModeMirrorMii" checked style="accent-color:var(--pink);" />
+              <span>Mirror Mii!</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;">
+              <input type="checkbox" id="uploadModeKawaii" checked style="accent-color:var(--pink);" />
+              <span>Kawaii Mode</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;">
+              <input type="checkbox" id="uploadModeDance" checked style="accent-color:var(--pink);" />
+              <span>Dance Challenge</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Publish Direct vs Pending -->
+        <div class="field-group" style="margin-top:0.75rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;background:rgba(16,185,129,0.08);padding:0.6rem 0.8rem;border-radius:8px;border:1px solid rgba(16,185,129,0.2);color:#34d399;">
+            <input type="checkbox" id="uploadSongAutoApprove" checked style="accent-color:#10b981;width:16px;height:16px;" />
+            <span><strong>Publish immediately</strong> (Make Available right away to players)</span>
+          </label>
+        </div>
+
+        <div class="form-actions" style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost" id="cancelUploadSongBtn">Cancel</button>
+          <button type="submit" id="submitUploadSongBtn" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;">
+            <span class="btn-text">Upload Music</span>
+            <span class="btn-loader hidden"></span>
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </div>

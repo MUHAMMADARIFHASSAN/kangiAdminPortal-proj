@@ -228,6 +228,15 @@ const KangiService = (function () {
   /* Delete a song from server catalog */
   function deleteSong(songId) { return _callVideoScript('deleteSong', { adminData: { songId } }); }
 
+  /* Submit / Upload a new song directly from the admin portal */
+  function addSong(songData) {
+    return _callVideoScript('adminAddSong', { adminData: { songData } })
+      .catch(() => {
+        // Fallback to submitSong if adminAddSong fails or is not present
+        return _callVideoScript('submitSong', { songData });
+      });
+  }
+
   /* ============================================================
      USER MANAGEMENT  (calls adminUserWorkflow)
      ============================================================ */
@@ -523,11 +532,12 @@ const KangiService = (function () {
   }
 
   /* Upload file to Cloudinary using unsigned upload
+     Supports resourceType: 'auto', 'image', 'video', 'raw' (default: 'auto')
      Returns { success: true, url: "https://..." } or { success: false, error: "..." } */
-  function uploadToCloudinary(file) {
+  function uploadToCloudinary(file, resourceType = 'auto') {
     return new Promise((resolve) => {
       const config = getCloudinaryConfig();
-      if (!config) {
+      if (!config || !config.cloudName || !config.uploadPreset) {
         resolve({ success: false, error: 'Cloudinary not configured. Go to Settings → TCG Image Storage and enter your credentials.' });
         return;
       }
@@ -536,7 +546,8 @@ const KangiService = (function () {
       formData.append('file', file);
       formData.append('upload_preset', config.uploadPreset);
 
-      const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`;
+      const type = resourceType || 'auto';
+      const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/${type}/upload`;
 
       fetch(uploadUrl, { method: 'POST', body: formData })
         .then(response => {
@@ -942,6 +953,7 @@ const KangiService = (function () {
     clearAll,
     resizeImage,
     getSongs,
+    addSong,
     approveSong,
     deleteSong,
     updateSongSettings,
