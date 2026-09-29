@@ -1190,155 +1190,181 @@
   }
 
   function _bindUploadMusicModal() {
-    if (!el.btnOpenUploadSongModal || !el.uploadSongModal) return;
+    const openBtn = document.getElementById('btnOpenUploadSongModal');
+    const modal = document.getElementById('uploadSongModal');
+    const closeBtn = document.getElementById('closeUploadSongModal');
+    const cancelBtn = document.getElementById('cancelUploadSongBtn');
+    const form = document.getElementById('uploadSongForm');
+    const modalAlert = document.getElementById('uploadSongModalAlert');
+
+    if (!openBtn || !modal) return;
 
     // Open Modal
-    el.btnOpenUploadSongModal.addEventListener('click', () => {
+    openBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       _resetUploadSongModal();
-      el.uploadSongModal.classList.remove('hidden');
+      modal.classList.remove('hidden');
     });
 
     // Close Modal
-    el.closeUploadSongModal?.addEventListener('click', () => {
-      el.uploadSongModal.classList.add('hidden');
-    });
-    el.cancelUploadSongBtn?.addEventListener('click', () => {
-      el.uploadSongModal.classList.add('hidden');
-    });
-    el.uploadSongModal.querySelector('.modal-overlay')?.addEventListener('click', () => {
-      el.uploadSongModal.classList.add('hidden');
-    });
+    closeBtn?.addEventListener('click', () => modal.classList.add('hidden'));
+    cancelBtn?.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.querySelector('.modal-overlay')?.addEventListener('click', () => modal.classList.add('hidden'));
 
     // Audio Source Toggle
-    el.btnAudioSourceFile?.addEventListener('click', () => {
+    const btnAudioFile = document.getElementById('btnAudioSourceFile');
+    const btnAudioUrl = document.getElementById('btnAudioSourceUrl');
+    const audioFileContainer = document.getElementById('audioFileInputContainer');
+    const audioUrlContainer = document.getElementById('audioUrlInputContainer');
+
+    btnAudioFile?.addEventListener('click', (e) => {
+      e.preventDefault();
       currentAudioSourceMode = 'file';
-      el.btnAudioSourceFile.classList.add('active');
-      el.btnAudioSourceFile.style.background = 'var(--pink)';
-      el.btnAudioSourceFile.style.color = '#fff';
-      el.btnAudioSourceUrl?.classList.remove('active');
-      if (el.btnAudioSourceUrl) {
-        el.btnAudioSourceUrl.style.background = 'transparent';
-        el.btnAudioSourceUrl.style.color = 'var(--text-muted)';
+      btnAudioFile.classList.add('active');
+      btnAudioFile.style.background = 'var(--pink)';
+      btnAudioFile.style.color = '#fff';
+      if (btnAudioUrl) {
+        btnAudioUrl.classList.remove('active');
+        btnAudioUrl.style.background = 'transparent';
+        btnAudioUrl.style.color = 'var(--text-muted)';
       }
-      el.audioFileInputContainer?.classList.remove('hidden');
-      el.audioUrlInputContainer?.classList.add('hidden');
+      audioFileContainer?.classList.remove('hidden');
+      audioUrlContainer?.classList.add('hidden');
     });
 
-    el.btnAudioSourceUrl?.addEventListener('click', () => {
+    btnAudioUrl?.addEventListener('click', (e) => {
+      e.preventDefault();
       currentAudioSourceMode = 'url';
-      el.btnAudioSourceUrl.classList.add('active');
-      el.btnAudioSourceUrl.style.background = 'var(--pink)';
-      el.btnAudioSourceUrl.style.color = '#fff';
-      el.btnAudioSourceFile?.classList.remove('active');
-      if (el.btnAudioSourceFile) {
-        el.btnAudioSourceFile.style.background = 'transparent';
-        el.btnAudioSourceFile.style.color = 'var(--text-muted)';
+      btnAudioUrl.classList.add('active');
+      btnAudioUrl.style.background = 'var(--pink)';
+      btnAudioUrl.style.color = '#fff';
+      if (btnAudioFile) {
+        btnAudioFile.classList.remove('active');
+        btnAudioFile.style.background = 'transparent';
+        btnAudioFile.style.color = 'var(--text-muted)';
       }
-      el.audioUrlInputContainer?.classList.remove('hidden');
-      el.audioFileInputContainer?.classList.add('hidden');
+      audioUrlContainer?.classList.remove('hidden');
+      audioFileContainer?.classList.add('hidden');
     });
 
     // Cover Source Toggle
-    el.btnCoverSourceFile?.addEventListener('click', () => {
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+    const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+    const coverFileContainer = document.getElementById('coverFileInputContainer');
+    const coverUrlContainer = document.getElementById('coverUrlInputContainer');
+
+    btnCoverFile?.addEventListener('click', (e) => {
+      e.preventDefault();
       currentCoverSourceMode = 'file';
-      el.btnCoverSourceFile.classList.add('active');
-      el.btnCoverSourceFile.style.background = 'var(--pink)';
-      el.btnCoverSourceFile.style.color = '#fff';
-      el.btnCoverSourceUrl?.classList.remove('active');
-      if (el.btnCoverSourceUrl) {
-        el.btnCoverSourceUrl.style.background = 'transparent';
-        el.btnCoverSourceUrl.style.color = 'var(--text-muted)';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
       }
-      el.coverFileInputContainer?.classList.remove('hidden');
-      el.coverUrlInputContainer?.classList.add('hidden');
+      coverFileContainer?.classList.remove('hidden');
+      coverUrlContainer?.classList.add('hidden');
     });
 
-    el.btnCoverSourceUrl?.addEventListener('click', () => {
+    btnCoverUrl?.addEventListener('click', (e) => {
+      e.preventDefault();
       currentCoverSourceMode = 'url';
-      el.btnCoverSourceUrl.classList.add('active');
-      el.btnCoverSourceUrl.style.background = 'var(--pink)';
-      el.btnCoverSourceUrl.style.color = '#fff';
-      el.btnCoverSourceFile?.classList.remove('active');
-      if (el.btnCoverSourceFile) {
-        el.btnCoverSourceFile.style.background = 'transparent';
-        el.btnCoverSourceFile.style.color = 'var(--text-muted)';
+      btnCoverUrl.classList.add('active');
+      btnCoverUrl.style.background = 'var(--pink)';
+      btnCoverUrl.style.color = '#fff';
+      if (btnCoverFile) {
+        btnCoverFile.classList.remove('active');
+        btnCoverFile.style.background = 'transparent';
+        btnCoverFile.style.color = 'var(--text-muted)';
       }
-      el.coverUrlInputContainer?.classList.remove('hidden');
-      el.coverFileInputContainer?.classList.add('hidden');
+      coverUrlContainer?.classList.remove('hidden');
+      coverFileContainer?.classList.add('hidden');
     });
 
-    // File selection label updates
-    el.uploadAudioFile?.addEventListener('change', (e) => {
+    // File selection text updates
+    const uploadAudioFileInput = document.getElementById('uploadAudioFile');
+    const audioFileNameText = document.getElementById('audioFileName');
+    uploadAudioFileInput?.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (el.audioFileName) {
-        el.audioFileName.textContent = file ? file.name : 'Select MP3, WAV, M4A, OGG file';
+      if (audioFileNameText) {
+        audioFileNameText.textContent = file ? file.name : 'Select MP3, WAV, M4A, OGG file';
       }
     });
 
-    el.uploadCoverFile?.addEventListener('change', (e) => {
+    const uploadCoverFileInput = document.getElementById('uploadCoverFile');
+    const coverFileNameText = document.getElementById('coverFileName');
+    uploadCoverFileInput?.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (el.coverFileName) {
-        el.coverFileName.textContent = file ? file.name : 'Select PNG, JPG artwork';
+      if (coverFileNameText) {
+        coverFileNameText.textContent = file ? file.name : 'Select PNG, JPG artwork';
       }
     });
 
     // Form Submit Handler
-    el.uploadSongForm?.addEventListener('submit', async (e) => {
+    form?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      _hideAlert(el.uploadSongModalAlert);
+      if (modalAlert) _hideAlert(modalAlert);
 
-      const title = el.uploadSongTitle?.value.trim();
-      const artist = el.uploadSongArtist?.value.trim() || 'Dashboard Admin';
+      const titleInput = document.getElementById('uploadSongTitle');
+      const artistInput = document.getElementById('uploadSongArtist');
+      const submitBtn = document.getElementById('submitUploadSongBtn');
+
+      const title = titleInput?.value.trim();
+      const artist = artistInput?.value.trim() || 'Dashboard Admin';
 
       if (!title) {
-        _alert(el.uploadSongModalAlert, 'error', 'Please enter a Song Title.');
+        if (modalAlert) _alert(modalAlert, 'error', 'Please enter a Song Title.');
         return;
       }
 
       let audioUrl = '';
       if (currentAudioSourceMode === 'file') {
-        const audioFile = el.uploadAudioFile?.files[0];
+        const audioFile = uploadAudioFileInput?.files[0];
         if (!audioFile) {
-          _alert(el.uploadSongModalAlert, 'error', 'Please select an audio file to upload or switch to Audio URL.');
+          if (modalAlert) _alert(modalAlert, 'error', 'Please select an audio file to upload or switch to Audio URL.');
           return;
         }
-        _setFormLoading(el.submitUploadSongBtn, true, 'Uploading Audio…');
+        _setFormLoading(submitBtn, true, 'Uploading Audio…');
         const uploadRes = await KangiService.uploadToCloudinary(audioFile, 'auto');
         if (!uploadRes.success) {
-          _setFormLoading(el.submitUploadSongBtn, false);
-          _alert(el.uploadSongModalAlert, 'error', uploadRes.error || 'Audio upload failed. Check Cloudinary settings.');
+          _setFormLoading(submitBtn, false);
+          if (modalAlert) _alert(modalAlert, 'error', uploadRes.error || 'Audio upload failed. Check Cloudinary settings.');
           return;
         }
         audioUrl = uploadRes.url;
       } else {
-        audioUrl = el.uploadAudioUrl?.value.trim();
+        const audioUrlInput = document.getElementById('uploadAudioUrl');
+        audioUrl = audioUrlInput?.value.trim();
         if (!audioUrl) {
-          _alert(el.uploadSongModalAlert, 'error', 'Please enter a valid Audio URL.');
+          if (modalAlert) _alert(modalAlert, 'error', 'Please enter a valid Audio URL.');
           return;
         }
       }
 
       let coverUrl = '';
       if (currentCoverSourceMode === 'file') {
-        const coverFile = el.uploadCoverFile?.files[0];
+        const coverFile = uploadCoverFileInput?.files[0];
         if (coverFile) {
-          _setFormLoading(el.submitUploadSongBtn, true, 'Uploading Cover Art…');
+          _setFormLoading(submitBtn, true, 'Uploading Cover Art…');
           const coverRes = await KangiService.uploadToCloudinary(coverFile, 'image');
           if (coverRes.success) {
             coverUrl = coverRes.url;
           }
         }
       } else {
-        coverUrl = el.uploadCoverUrl?.value.trim() || '';
+        const coverUrlInput = document.getElementById('uploadCoverUrl');
+        coverUrl = coverUrlInput?.value.trim() || '';
       }
 
-      // Collect game modes
       const modes = [];
-      if (el.uploadModeMirrorMii?.checked) modes.push('mirror_mii');
-      if (el.uploadModeKawaii?.checked) modes.push('kawaii_mode');
-      if (el.uploadModeDance?.checked) modes.push('dance_challenge');
+      if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
+      if (document.getElementById('uploadModeKawaii')?.checked) modes.push('kawaii_mode');
+      if (document.getElementById('uploadModeDance')?.checked) modes.push('dance_challenge');
 
-      const isPending = !el.uploadSongAutoApprove?.checked;
+      const isPending = !document.getElementById('uploadSongAutoApprove')?.checked;
 
       const songData = {
         SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
@@ -1354,36 +1380,69 @@
         uploaderName: 'Dashboard Admin'
       };
 
-      _setFormLoading(el.submitUploadSongBtn, true, 'Saving Song…');
+      _setFormLoading(submitBtn, true, 'Saving Song…');
 
       try {
         const autoApprove = !isPending;
         const res = await KangiService.addSong(songData, autoApprove);
-        _setFormLoading(el.submitUploadSongBtn, false);
+        _setFormLoading(submitBtn, false);
 
         if (res && res.success !== false) {
-          _alert(el.uploadSongModalAlert, 'success', '🎵 Song successfully uploaded and added to library!');
+          if (modalAlert) _alert(modalAlert, 'success', '🎵 Song successfully uploaded and added to library!');
           setTimeout(() => {
-            el.uploadSongModal.classList.add('hidden');
+            modal.classList.add('hidden');
             _loadSongsData();
           }, 1200);
         } else {
-          _alert(el.uploadSongModalAlert, 'error', res?.error || res?.message || 'Failed to save song to server.');
+          if (modalAlert) _alert(modalAlert, 'error', res?.error || res?.message || 'Failed to save song to server.');
         }
       } catch (err) {
-        _setFormLoading(el.submitUploadSongBtn, false);
-        _alert(el.uploadSongModalAlert, 'error', err?.message || err || 'Failed to save song to server.');
+        _setFormLoading(submitBtn, false);
+        if (modalAlert) _alert(modalAlert, 'error', err?.message || err || 'Failed to save song to server.');
       }
     });
   }
 
   function _resetUploadSongModal() {
-    _hideAlert(el.uploadSongModalAlert);
-    if (el.uploadSongForm) el.uploadSongForm.reset();
-    if (el.audioFileName) el.audioFileName.textContent = 'Select MP3, WAV, M4A, OGG file';
-    if (el.coverFileName) el.coverFileName.textContent = 'Select PNG, JPG artwork';
-    el.btnAudioSourceFile?.click();
-    el.btnCoverSourceFile?.click();
+    const modalAlert = document.getElementById('uploadSongModalAlert');
+    const form = document.getElementById('uploadSongForm');
+    const audioFileNameText = document.getElementById('audioFileName');
+    const coverFileNameText = document.getElementById('coverFileName');
+    const btnAudioFile = document.getElementById('btnAudioSourceFile');
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+
+    if (modalAlert) _hideAlert(modalAlert);
+    if (form) form.reset();
+    if (audioFileNameText) audioFileNameText.textContent = 'Select MP3, WAV, M4A, OGG file';
+    if (coverFileNameText) coverFileNameText.textContent = 'Select PNG, JPG artwork';
+    if (btnAudioFile) {
+      currentAudioSourceMode = 'file';
+      btnAudioFile.classList.add('active');
+      btnAudioFile.style.background = 'var(--pink)';
+      btnAudioFile.style.color = '#fff';
+      const btnAudioUrl = document.getElementById('btnAudioSourceUrl');
+      if (btnAudioUrl) {
+        btnAudioUrl.classList.remove('active');
+        btnAudioUrl.style.background = 'transparent';
+        btnAudioUrl.style.color = 'var(--text-muted)';
+      }
+      document.getElementById('audioFileInputContainer')?.classList.remove('hidden');
+      document.getElementById('audioUrlInputContainer')?.classList.add('hidden');
+    }
+    if (btnCoverFile) {
+      currentCoverSourceMode = 'file';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
+      }
+      document.getElementById('coverFileInputContainer')?.classList.remove('hidden');
+      document.getElementById('coverUrlInputContainer')?.classList.add('hidden');
+    }
   }
 
   function _setSongFilter(filter) {
@@ -1708,6 +1767,12 @@
     if (!btn) return;
     const action = btn.dataset.action;
     const songId = btn.dataset.id;
+
+    if (action === 'open-upload-modal') {
+      _resetUploadSongModal();
+      document.getElementById('uploadSongModal')?.classList.remove('hidden');
+      return;
+    }
 
     if (action === 'toggle-settings') {
       const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
