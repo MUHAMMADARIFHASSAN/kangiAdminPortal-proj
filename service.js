@@ -228,13 +228,21 @@ const KangiService = (function () {
   /* Delete a song from server catalog */
   function deleteSong(songId) { return _callVideoScript('deleteSong', { adminData: { songId } }); }
 
-  /* Submit / Upload a new song directly from the admin portal */
-  function addSong(songData) {
-    return _callVideoScript('adminAddSong', { adminData: { songData } })
-      .catch(() => {
-        // Fallback to submitSong if adminAddSong fails or is not present
-        return _callVideoScript('submitSong', { songData });
-      });
+  /* Submit / Upload a new song using existing CloudScript functions (submitSong + approveSong) */
+  async function addSong(songData, autoApprove = true) {
+    const res = await _callVideoScript('submitSong', { songData });
+    if (!res || res.success === false) {
+      throw new Error(res?.error || res?.message || 'Failed to submit song.');
+    }
+    // If autoApprove is enabled (Publish immediately), approve it right away
+    if (autoApprove && songData.SongId) {
+      try {
+        await approveSong(songData.SongId);
+      } catch (eApprove) {
+        console.warn('[Kangi] Song submitted, auto-approve warning:', eApprove);
+      }
+    }
+    return res;
   }
 
   /* ============================================================

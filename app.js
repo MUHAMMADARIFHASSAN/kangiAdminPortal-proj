@@ -1357,7 +1357,8 @@
       _setFormLoading(el.submitUploadSongBtn, true, 'Saving Song…');
 
       try {
-        const res = await KangiService.addSong(songData);
+        const autoApprove = !isPending;
+        const res = await KangiService.addSong(songData, autoApprove);
         _setFormLoading(el.submitUploadSongBtn, false);
 
         if (res && res.success !== false) {

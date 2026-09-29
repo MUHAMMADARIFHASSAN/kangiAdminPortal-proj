@@ -250,77 +250,7 @@ handlers.videoAppWorkflow = function (args, context) {
     // ====================================================================================
     var adminParams = args.adminData || {};
 
-    // H. ADMIN UPLOAD / ADD NEW SONG DIRECTLY
-    if (action === "adminAddSong" || action === "addSong") {
-        var sInput = adminParams.songData || args.songData || adminParams || args;
-        var sTitle = sInput.SongName || sInput.title || sInput.name || sInput.songTitle;
-        var sUrl   = sInput.SongUrl  || sInput.url   || sInput.musicUrl || sInput.songLink;
 
-        if (!sTitle) return { success: false, error: "Song Title is required." };
-        if (!sUrl)   return { success: false, error: "Audio URL or file is required." };
-
-        var newSongObj = {
-            SongId:       sInput.SongId || sInput.id || ("song_" + Date.now() + "_" + Math.floor(Math.random() * 10000)),
-            SongName:     sTitle,
-            Singer:       sInput.Singer || sInput.artist || sInput.singer || "",
-            SongUrl:      sUrl,
-            AvatarUrl:    sInput.AvatarUrl || sInput.cover || sInput.coverUrl || sInput.avatarUrl || sInput.imageUrl || "",
-            modes:        Array.isArray(sInput.modes) && sInput.modes.length ? sInput.modes : ["mirror_mii", "kawaii_mode"],
-            trimStart:    Number(sInput.trimStart) || 0,
-            trimEnd:      Number(sInput.trimEnd)   || 0,
-            isPending:    typeof sInput.isPending !== "undefined" ? (sInput.isPending === true || sInput.isPending === "true") : false,
-            uploaderId:   sInput.uploaderId || "Admin",
-            uploaderName: sInput.uploaderName || "Dashboard Admin",
-            createdAt:    new Date().toISOString()
-        };
-
-        var curSongsRes = server.GetTitleInternalData({ Keys: [SONGS_DATABASE_KEY] });
-        var allList = [];
-        var appList = [];
-        var pendList = [];
-
-        if (curSongsRes.Data && curSongsRes.Data[SONGS_DATABASE_KEY]) {
-            try {
-                var parsedS = JSON.parse(curSongsRes.Data[SONGS_DATABASE_KEY]);
-                if (Array.isArray(parsedS)) {
-                    allList = parsedS;
-                } else if (parsedS.songs) {
-                    allList = parsedS.songs;
-                } else {
-                    allList = [];
-                    if (parsedS.approvedSongs) allList = allList.concat(parsedS.approvedSongs);
-                    if (parsedS.pendingSongs)  allList = allList.concat(parsedS.pendingSongs);
-                }
-            } catch (e) {
-                allList = [];
-            }
-        }
-
-        allList.unshift(newSongObj);
-
-        for (var idx = 0; idx < allList.length; idx++) {
-            if (allList[idx].isPending === true || allList[idx].isPending === "true") {
-                pendList.push(allList[idx]);
-            } else {
-                appList.push(allList[idx]);
-            }
-        }
-
-        server.SetTitleInternalData({
-            Key:   SONGS_DATABASE_KEY,
-            Value: JSON.stringify({
-                songs:         allList,
-                approvedSongs: appList,
-                pendingSongs:  pendList
-            })
-        });
-
-        return {
-            success: true,
-            message: "Song uploaded and added to library successfully.",
-            song:    newSongObj
-        };
-    }
 
     // F. APPROVE A PENDING SONG + send notification
     // ====================================================================================
