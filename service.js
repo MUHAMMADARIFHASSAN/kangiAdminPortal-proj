@@ -48,6 +48,7 @@ const KangiService = (function () {
           session.playFabId   = result.data.PlayFabId;
           session.email       = email.trim();
           session.displayName = result.data.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+          const ticket        = result.data.SessionTicket;
 
           /* Admin check — mirrors AdminManager.CheckAdminStatus() */
           _checkAdminStatus()
@@ -57,6 +58,7 @@ const KangiService = (function () {
                 _clearSession();
                 reject('Access denied. This account does not have administrator privileges.');
               } else {
+                _saveSessionToStorage(ticket);
                 resolve({
                   success:     true,
                   isAdmin:     true,
@@ -130,11 +132,54 @@ const KangiService = (function () {
     });
   }
 
+  const SESSION_STORAGE_KEY = 'kangi_admin_session_v2';
+
+  function _saveSessionToStorage(ticket) {
+    try {
+      const data = {
+        playFabId:     session.playFabId,
+        email:         session.email,
+        displayName:   session.displayName,
+        sessionTicket: ticket || (typeof PlayFab !== 'undefined' && PlayFab._internalSettings && PlayFab._internalSettings.sessionTicket),
+        timestamp:     Date.now()
+      };
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  function restoreSession() {
+    try {
+      const saved = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.playFabId && parsed.sessionTicket) {
+        if (typeof PlayFab !== 'undefined' && PlayFab._internalSettings) {
+          PlayFab._internalSettings.sessionTicket = parsed.sessionTicket;
+        }
+        session.playFabId   = parsed.playFabId;
+        session.email       = parsed.email || '';
+        session.displayName = parsed.displayName || '';
+        session.isAdmin     = true;
+        return {
+          success:     true,
+          isAdmin:     true,
+          playFabId:   parsed.playFabId,
+          displayName: parsed.displayName,
+          email:       parsed.email
+        };
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function _clearSession() {
     session.playFabId   = null;
     session.email       = null;
     session.displayName = null;
     session.isAdmin     = false;
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (e) {}
   }
 
   /* ============================================================
@@ -953,6 +998,7 @@ const KangiService = (function () {
     init,
     login,
     logout,
+    restoreSession,
     sendAccountRecoveryEmail,
     session,
     getNfts,

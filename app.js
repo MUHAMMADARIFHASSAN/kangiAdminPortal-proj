@@ -210,6 +210,12 @@
     _bindUserSearch();
     _bindUserModals();
     _bindMessages();
+
+    // Auto-restore session if saved in localStorage
+    const savedSession = KangiService.restoreSession();
+    if (savedSession) {
+      _onLoginSuccess(savedSession);
+    }
   }
 
   /* ================================================================
@@ -1205,12 +1211,18 @@
       e.stopPropagation();
       _resetUploadSongModal();
       modal.classList.remove('hidden');
+      modal.style.display = 'flex';
     });
 
     // Close Modal
-    closeBtn?.addEventListener('click', () => modal.classList.add('hidden'));
-    cancelBtn?.addEventListener('click', () => modal.classList.add('hidden'));
-    modal.querySelector('.modal-overlay')?.addEventListener('click', () => modal.classList.add('hidden'));
+    const _closeModal = () => {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    };
+
+    closeBtn?.addEventListener('click', _closeModal);
+    cancelBtn?.addEventListener('click', _closeModal);
+    modal.querySelector('.modal-overlay')?.addEventListener('click', _closeModal);
 
     // Audio Source Toggle
     const btnAudioFile = document.getElementById('btnAudioSourceFile');
@@ -1770,7 +1782,11 @@
 
     if (action === 'open-upload-modal') {
       _resetUploadSongModal();
-      document.getElementById('uploadSongModal')?.classList.remove('hidden');
+      const m = document.getElementById('uploadSongModal');
+      if (m) {
+        m.classList.remove('hidden');
+        m.style.display = 'flex';
+      }
       return;
     }
 
@@ -2061,6 +2077,42 @@
   }
 
   function _hideEl(node) { node.classList.add('hidden'); }
+
+  /* Alias used by the Upload Music modal */
+  function _hideAlert(node) {
+    if (!node) return;
+    node.classList.add('hidden');
+    node.textContent = '';
+  }
+
+  /* Show/hide loading state on a submit button with a custom label.
+     Restores the button's original text when called with on=false. */
+  function _setFormLoading(btn, on, label) {
+    if (!btn) return;
+    btn.disabled = on;
+    const textEl = btn.querySelector('.btn-text');
+    const loaderEl = btn.querySelector('.btn-loader');
+    if (on) {
+      if (textEl) {
+        btn._origText = btn._origText || textEl.textContent;
+        textEl.textContent = label || 'Loading…';
+        textEl.classList.remove('hidden');
+      } else {
+        btn._origHTML = btn._origHTML || btn.innerHTML;
+        btn.innerHTML = `<span class="btn-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px;display:inline-block;"></span>${label || 'Loading…'}`;
+      }
+      loaderEl?.classList.remove('hidden');
+    } else {
+      if (textEl) {
+        if (btn._origText) { textEl.textContent = btn._origText; btn._origText = null; }
+        textEl.classList.remove('hidden');
+      } else if (btn._origHTML) {
+        btn.innerHTML = btn._origHTML;
+        btn._origHTML = null;
+      }
+      loaderEl?.classList.add('hidden');
+    }
+  }
 
   function _setLoading(btn, on) {
     btn.disabled = on;
