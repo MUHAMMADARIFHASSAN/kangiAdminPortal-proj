@@ -98,7 +98,6 @@
     cancelUploadSongBtn:    $('cancelUploadSongBtn'),
     uploadSongForm:         $('uploadSongForm'),
     uploadSongTitle:        $('uploadSongTitle'),
-    uploadSongArtist:       $('uploadSongArtist'),
     btnAudioSourceFile:     $('btnAudioSourceFile'),
     btnAudioSourceUrl:      $('btnAudioSourceUrl'),
     audioFileInputContainer:$('audioFileInputContainer'),
@@ -106,13 +105,9 @@
     uploadAudioFile:        $('uploadAudioFile'),
     uploadAudioUrl:         $('uploadAudioUrl'),
     audioFileName:          $('audioFileName'),
-    btnCoverSourceFile:     $('btnCoverSourceFile'),
-    btnCoverSourceUrl:      $('btnCoverSourceUrl'),
-    coverFileInputContainer:$('coverFileInputContainer'),
-    coverUrlInputContainer: $('coverUrlInputContainer'),
-    uploadCoverFile:        $('uploadCoverFile'),
-    uploadCoverUrl:         $('uploadCoverUrl'),
-    coverFileName:          $('coverFileName'),
+    uploadAsAvatar:         $('uploadAsAvatar'),
+    uploadAsInitial:        $('uploadAsInitial'),
+    uploadAsName:           $('uploadAsName'),
     uploadModeMirrorMii:    $('uploadModeMirrorMii'),
     uploadModeKawaii:       $('uploadModeKawaii'),
     uploadModeDance:        $('uploadModeDance'),
@@ -1185,7 +1180,6 @@
      SOUNDS — Management of Audio Tracks
      ================================================================ */
   let currentAudioSourceMode = 'file';
-  let currentCoverSourceMode = 'file';
 
   function _bindSounds() {
     if (!el.soundsLibrary) return;
@@ -1262,42 +1256,6 @@
       audioFileContainer?.classList.add('hidden');
     });
 
-    // Cover Source Toggle
-    const btnCoverFile = document.getElementById('btnCoverSourceFile');
-    const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
-    const coverFileContainer = document.getElementById('coverFileInputContainer');
-    const coverUrlContainer = document.getElementById('coverUrlInputContainer');
-
-    btnCoverFile?.addEventListener('click', (e) => {
-      e.preventDefault();
-      currentCoverSourceMode = 'file';
-      btnCoverFile.classList.add('active');
-      btnCoverFile.style.background = 'var(--pink)';
-      btnCoverFile.style.color = '#fff';
-      if (btnCoverUrl) {
-        btnCoverUrl.classList.remove('active');
-        btnCoverUrl.style.background = 'transparent';
-        btnCoverUrl.style.color = 'var(--text-muted)';
-      }
-      coverFileContainer?.classList.remove('hidden');
-      coverUrlContainer?.classList.add('hidden');
-    });
-
-    btnCoverUrl?.addEventListener('click', (e) => {
-      e.preventDefault();
-      currentCoverSourceMode = 'url';
-      btnCoverUrl.classList.add('active');
-      btnCoverUrl.style.background = 'var(--pink)';
-      btnCoverUrl.style.color = '#fff';
-      if (btnCoverFile) {
-        btnCoverFile.classList.remove('active');
-        btnCoverFile.style.background = 'transparent';
-        btnCoverFile.style.color = 'var(--text-muted)';
-      }
-      coverUrlContainer?.classList.remove('hidden');
-      coverFileContainer?.classList.add('hidden');
-    });
-
     // File selection text updates
     const uploadAudioFileInput = document.getElementById('uploadAudioFile');
     const audioFileNameText = document.getElementById('audioFileName');
@@ -1308,22 +1266,12 @@
       }
     });
 
-    const uploadCoverFileInput = document.getElementById('uploadCoverFile');
-    const coverFileNameText = document.getElementById('coverFileName');
-    uploadCoverFileInput?.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (coverFileNameText) {
-        coverFileNameText.textContent = file ? file.name : 'Select PNG, JPG artwork';
-      }
-    });
-
     // Form Submit Handler
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (modalAlert) _hideAlert(modalAlert);
 
       const titleInput = document.getElementById('uploadSongTitle');
-      const artistInput = document.getElementById('uploadSongArtist');
       const submitBtn = document.getElementById('submitUploadSongBtn');
 
       // Who is actually uploading. Resolved from the signed-in PlayFab account via the
@@ -1333,7 +1281,9 @@
       const admin = KangiService.getAdminIdentity();
 
       const title = titleInput?.value.trim();
-      const artist = artistInput?.value.trim() || admin.displayName;
+
+      // Artist is no longer a form field: the song is credited to the admin uploading it.
+      const artist = admin.displayName;
 
       if (!title) {
         if (modalAlert) _alert(modalAlert, 'error', 'Please enter a Song Title.');
@@ -1364,25 +1314,9 @@
         }
       }
 
-      let coverUrl = '';
-      if (currentCoverSourceMode === 'file') {
-        const coverFile = uploadCoverFileInput?.files[0];
-        if (coverFile) {
-          _setFormLoading(submitBtn, true, 'Uploading Cover Art…');
-          const coverRes = await KangiService.uploadToCloudinary(coverFile, 'image');
-          if (coverRes.success) {
-            coverUrl = coverRes.url;
-          }
-        }
-      } else {
-        const coverUrlInput = document.getElementById('uploadCoverUrl');
-        coverUrl = coverUrlInput?.value.trim() || '';
-      }
-
-      // No artwork supplied: use the uploading admin's profile picture, so the song
-      // still has an image everywhere it is listed instead of a blank placeholder.
-      // Explicitly chosen artwork always wins over it.
-      if (!coverUrl) coverUrl = admin.avatarUrl || '';
+      // Cover artwork is no longer a form field either: the admin's own profile
+      // picture is the artwork, which keeps every song tied to a real account.
+      const coverUrl = admin.avatarUrl || '';
 
       const modes = [];
       if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
@@ -1401,9 +1335,10 @@
       // admin-uploaded song showed a file name in the app instead of the title typed here.
       //
       // So each value is written under BOTH names: the one Unity reads, and the legacy
-      // alias the dashboard's own lists were built against. The server normalises these
-      // too (see _normalizeSong in cloudscript.js), which is what keeps the two in step;
-      // writing them correctly at the source just means the stored record is already right.
+      // alias the dashboard's own lists were built against. The app also folds the legacy
+      // spellings itself (SongData.Normalize in Unity), which is what repairs songs
+      // uploaded before this fix; writing them correctly here means new records are
+      // already right without relying on that. CloudScript is deliberately untouched.
       const songData = {
         SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
 
@@ -1461,14 +1396,15 @@
     const modalAlert = document.getElementById('uploadSongModalAlert');
     const form = document.getElementById('uploadSongForm');
     const audioFileNameText = document.getElementById('audioFileName');
-    const coverFileNameText = document.getElementById('coverFileName');
     const btnAudioFile = document.getElementById('btnAudioSourceFile');
-    const btnCoverFile = document.getElementById('btnCoverSourceFile');
 
     if (modalAlert) _hideAlert(modalAlert);
     if (form) form.reset();
     if (audioFileNameText) audioFileNameText.textContent = 'Select MP3, WAV, M4A, OGG file';
-    if (coverFileNameText) coverFileNameText.textContent = 'Select PNG, JPG artwork';
+
+    // Re-read the account each time the modal opens: the admin may have changed their
+    // name or picture in the game since this tab was loaded.
+    _renderUploadAsIdentity();
     if (btnAudioFile) {
       currentAudioSourceMode = 'file';
       btnAudioFile.classList.add('active');
@@ -1483,19 +1419,33 @@
       document.getElementById('audioFileInputContainer')?.classList.remove('hidden');
       document.getElementById('audioUrlInputContainer')?.classList.add('hidden');
     }
-    if (btnCoverFile) {
-      currentCoverSourceMode = 'file';
-      btnCoverFile.classList.add('active');
-      btnCoverFile.style.background = 'var(--pink)';
-      btnCoverFile.style.color = '#fff';
-      const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
-      if (btnCoverUrl) {
-        btnCoverUrl.classList.remove('active');
-        btnCoverUrl.style.background = 'transparent';
-        btnCoverUrl.style.color = 'var(--text-muted)';
+  }
+
+  /* Shows the admin whose name and picture this upload will carry. The artist and
+     cover-art fields were removed, so without this the substitution is invisible. */
+  function _renderUploadAsIdentity() {
+    const admin = KangiService.getAdminIdentity();
+
+    if (el.uploadAsName) el.uploadAsName.textContent = admin.displayName || '—';
+
+    const initial = (admin.displayName || '?').charAt(0).toUpperCase();
+    if (el.uploadAsInitial) el.uploadAsInitial.textContent = initial;
+
+    // The picture is optional. Fall back to the initial rather than a broken image,
+    // including when the URL itself fails to load.
+    if (el.uploadAsAvatar) {
+      if (admin.avatarUrl) {
+        el.uploadAsAvatar.onerror = () => {
+          el.uploadAsAvatar.style.display = 'none';
+          if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'flex';
+        };
+        el.uploadAsAvatar.src = admin.avatarUrl;
+        el.uploadAsAvatar.style.display = 'block';
+        if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'none';
+      } else {
+        el.uploadAsAvatar.style.display = 'none';
+        if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'flex';
       }
-      document.getElementById('coverFileInputContainer')?.classList.remove('hidden');
-      document.getElementById('coverUrlInputContainer')?.classList.add('hidden');
     }
   }
 
