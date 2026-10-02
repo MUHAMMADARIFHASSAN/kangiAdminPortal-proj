@@ -1378,12 +1378,36 @@
 
       const isPending = !document.getElementById('uploadSongAutoApprove')?.checked;
 
+      // Field names matter here, and they are not interchangeable.
+      //
+      // The dashboard reads songs through a tolerant fallback chain, so it looked correct
+      // whichever key the title was under. Unity does not: it parses with JsonUtility,
+      // which is case-sensitive and silently discards unrecognised fields, and it reads
+      // `songTitle`. Sending only `SongName` meant the app received no title at all and
+      // fell back to naming the track after the downloaded audio file - the reason an
+      // admin-uploaded song showed a file name in the app instead of the title typed here.
+      //
+      // So each value is written under BOTH names: the one Unity reads, and the legacy
+      // alias the dashboard's own lists were built against. The server normalises these
+      // too (see _normalizeSong in cloudscript.js), which is what keeps the two in step;
+      // writing them correctly at the source just means the stored record is already right.
       const songData = {
         SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
-        SongName: title,
-        Singer: artist,
-        SongUrl: audioUrl,
-        AvatarUrl: coverUrl,
+
+        songTitle: title,          // Unity: SongData.songTitle  -> the song row label
+        SongName: title,           // legacy alias, still read by the dashboard lists
+
+        Singer: artist,            // Unity: SongData.Singer     -> the credit line
+        artistName: artist,        // Unity falls back to this when Singer is empty
+
+        SongUrl: audioUrl,         // Unity: tried first by GetAudioUrl()
+        songLink: audioUrl,        // Unity: its fallback. The app's own uploader writes both.
+
+        coverImageUrl: coverUrl,   // album art has its own field - NOT avatarUrl, which is
+        AvatarUrl: coverUrl,       // the uploader's profile picture. Legacy alias kept.
+
+        uploadDate: _todayStamp(), // dd-MMM-yy, matching what the Unity uploader stamps
+
         modes: modes.length ? modes : ['mirror_mii', 'kawaii_mode'],
         trimStart: 0,
         trimEnd: 0,
@@ -2077,6 +2101,14 @@
   }
 
   function _hideEl(node) { node.classList.add('hidden'); }
+
+  /* dd-MMM-yy — the same stamp the Unity uploader writes, so a song added from the
+     dashboard and one added from the app sort and read identically in the app. */
+  function _todayStamp() {
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, '0')}-${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+  }
 
   /* Alias used by the Upload Music modal */
   function _hideAlert(node) {
