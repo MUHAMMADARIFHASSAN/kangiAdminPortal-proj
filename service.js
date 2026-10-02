@@ -15,6 +15,7 @@ const KangiService = (function () {
     playFabId:   null,
     email:       null,
     displayName: null,
+    avatarUrl:   null,
     isAdmin:     false,
     isLoggedIn:  () => !!session.playFabId
   };
@@ -37,7 +38,12 @@ const KangiService = (function () {
           TitleId:  TITLE_ID,
           Email:    email.trim(),
           Password: password,
-          InfoRequestParameters: { GetPlayerProfile: true }
+          InfoRequestParameters: {
+            GetPlayerProfile:  true,
+            // AvatarUrl is withheld unless it is asked for explicitly, and the title
+            // must also allow it under Game Manager > Client Profile Options.
+            ProfileConstraints: { ShowDisplayName: true, ShowAvatarUrl: true }
+          }
         },
         (result, error) => {
           if (error) {
@@ -48,6 +54,7 @@ const KangiService = (function () {
           session.playFabId   = result.data.PlayFabId;
           session.email       = email.trim();
           session.displayName = result.data.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+          session.avatarUrl   = result.data.InfoResultPayload?.PlayerProfile?.AvatarUrl   || '';
           const ticket        = result.data.SessionTicket;
 
           /* Admin check — mirrors AdminManager.CheckAdminStatus() */
@@ -58,13 +65,18 @@ const KangiService = (function () {
                 _clearSession();
                 reject('Access denied. This account does not have administrator privileges.');
               } else {
-                _saveSessionToStorage(ticket);
-                resolve({
-                  success:     true,
-                  isAdmin:     true,
-                  playFabId:   session.playFabId,
-                  displayName: session.displayName,
-                  email:       session.email
+                // Resolve the name and picture before the session is stored, so a
+                // reload has them without a second round trip.
+                loadAdminIdentity().then(() => {
+                  _saveSessionToStorage(ticket);
+                  resolve({
+                    success:     true,
+                    isAdmin:     true,
+                    playFabId:   session.playFabId,
+                    displayName: session.displayName,
+                    avatarUrl:   session.avatarUrl,
+                    email:       session.email
+                  });
                 });
               }
             })
@@ -75,6 +87,68 @@ const KangiService = (function () {
         }
       );
     });
+  }
+
+  /* ============================================================
+     ADMIN IDENTITY — name + profile picture
+
+     Read from the same place the game reads a player's identity, or the
+     dashboard would stamp a different picture onto a song than the one the app
+     shows for that same account.
+
+     UploaderProfileDirectory.cs in Unity looks in PlayFab **UserData** first —
+     keys "AvatarUrl"/"avatarUrl" and "DisplayName"/"UserName", written with
+     Public permission — and only falls back to the PlayerProfile. This mirrors
+     that order exactly.
+
+     Never rejects: a missing picture is not a reason to block an upload, it
+     just means the song carries no avatar and the app falls back to its own
+     profile lookup.
+     ============================================================ */
+  function loadAdminIdentity() {
+    return new Promise(resolve => {
+      if (!session.playFabId) { resolve(session); return; }
+
+      PlayFabClientSDK.GetUserData(
+        { Keys: ['AvatarUrl', 'avatarUrl', 'DisplayName', 'displayName', 'UserName', 'username'] },
+        (result, error) => {
+          if (!error) {
+            const d = result?.data?.Data || {};
+            const pick = (...keys) => {
+              for (const k of keys) {
+                const v = d[k]?.Value;
+                if (v && String(v).trim()) return String(v).trim();
+              }
+              return '';
+            };
+
+            const avatar = pick('AvatarUrl', 'avatarUrl');
+            const name   = pick('DisplayName', 'displayName', 'UserName', 'username');
+
+            if (avatar) session.avatarUrl   = avatar;
+            if (name)   session.displayName = name;
+          }
+
+          // Last resort for the name only: the local part of the sign-in email.
+          // Never invented for the picture — a wrong avatar is worse than none.
+          if (!session.displayName && session.email) {
+            session.displayName = session.email.split('@')[0];
+          }
+          resolve(session);
+        }
+      );
+    });
+  }
+
+  /* Who the dashboard is acting as. Used to stamp uploads with a real identity
+     instead of the old hardcoded "Dashboard Admin". */
+  function getAdminIdentity() {
+    return {
+      playFabId:   session.playFabId || '',
+      displayName: session.displayName || (session.email ? session.email.split('@')[0] : '') || 'Dashboard Admin',
+      avatarUrl:   session.avatarUrl || '',
+      email:       session.email || ''
+    };
   }
 
   /* ── Admin Status Check  (mirrors AdminManager.cs → GetUserData IsAdmin) ── */
@@ -140,6 +214,7 @@ const KangiService = (function () {
         playFabId:     session.playFabId,
         email:         session.email,
         displayName:   session.displayName,
+        avatarUrl:     session.avatarUrl,
         sessionTicket: ticket || (typeof PlayFab !== 'undefined' && PlayFab._internalSettings && PlayFab._internalSettings.sessionTicket),
         timestamp:     Date.now()
       };
@@ -159,12 +234,20 @@ const KangiService = (function () {
         session.playFabId   = parsed.playFabId;
         session.email       = parsed.email || '';
         session.displayName = parsed.displayName || '';
+        session.avatarUrl   = parsed.avatarUrl || '';
         session.isAdmin     = true;
+
+        // Restored from storage, so the cached copy may be stale - the admin could
+        // have changed their picture in the game since. Refresh in the background;
+        // the stored values are good enough to render with until it lands.
+        loadAdminIdentity().catch(() => {});
+
         return {
           success:     true,
           isAdmin:     true,
           playFabId:   parsed.playFabId,
           displayName: parsed.displayName,
+          avatarUrl:   parsed.avatarUrl || '',
           email:       parsed.email
         };
       }
@@ -176,6 +259,7 @@ const KangiService = (function () {
     session.playFabId   = null;
     session.email       = null;
     session.displayName = null;
+    session.avatarUrl   = null;
     session.isAdmin     = false;
     try {
       localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -997,6 +1081,8 @@ const KangiService = (function () {
   return {
     init,
     login,
+    loadAdminIdentity,
+    getAdminIdentity,
     logout,
     restoreSession,
     sendAccountRecoveryEmail,

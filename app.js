@@ -777,7 +777,9 @@
       const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
       const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
       const artist = singer || uploader || "Unknown Artist";
-      const cover = song.avatarUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.avatar || song.photoURL || song.photoUrl || song.imageUrl || song.image || "";
+      // Artwork first, uploader picture last. The chain used to lead with avatarUrl, so a
+      // song that carried both showed the uploader's face instead of its own cover art.
+      const cover = song.coverImageUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.imageUrl || song.image || song.avatarUrl || song.avatar || song.photoURL || song.photoUrl || "";
       const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
 
       let artistSub = _esc(artist);
@@ -1324,8 +1326,14 @@
       const artistInput = document.getElementById('uploadSongArtist');
       const submitBtn = document.getElementById('submitUploadSongBtn');
 
+      // Who is actually uploading. Resolved from the signed-in PlayFab account via the
+      // same UserData keys the game reads (see loadAdminIdentity in service.js), so the
+      // name and picture stamped on the song are the ones the app already shows for
+      // this account - not the old hardcoded "Dashboard Admin".
+      const admin = KangiService.getAdminIdentity();
+
       const title = titleInput?.value.trim();
-      const artist = artistInput?.value.trim() || 'Dashboard Admin';
+      const artist = artistInput?.value.trim() || admin.displayName;
 
       if (!title) {
         if (modalAlert) _alert(modalAlert, 'error', 'Please enter a Song Title.');
@@ -1371,6 +1379,11 @@
         coverUrl = coverUrlInput?.value.trim() || '';
       }
 
+      // No artwork supplied: use the uploading admin's profile picture, so the song
+      // still has an image everywhere it is listed instead of a blank placeholder.
+      // Explicitly chosen artwork always wins over it.
+      if (!coverUrl) coverUrl = admin.avatarUrl || '';
+
       const modes = [];
       if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
       if (document.getElementById('uploadModeKawaii')?.checked) modes.push('kawaii_mode');
@@ -1403,8 +1416,8 @@
         SongUrl: audioUrl,         // Unity: tried first by GetAudioUrl()
         songLink: audioUrl,        // Unity: its fallback. The app's own uploader writes both.
 
-        coverImageUrl: coverUrl,   // album art has its own field - NOT avatarUrl, which is
-        AvatarUrl: coverUrl,       // the uploader's profile picture. Legacy alias kept.
+        coverImageUrl: coverUrl,   // album art: the chosen artwork, else the admin's picture
+        AvatarUrl: coverUrl,       // legacy alias for the same thing
 
         uploadDate: _todayStamp(), // dd-MMM-yy, matching what the Unity uploader stamps
 
@@ -1412,8 +1425,13 @@
         trimStart: 0,
         trimEnd: 0,
         isPending: isPending,
-        uploaderId: 'Admin',
-        uploaderName: 'Dashboard Admin'
+
+        // The uploader is a real account, not a label. CloudScript overwrites uploaderId
+        // with the caller's PlayFab ID regardless - which is this same admin - but setting
+        // it here keeps the record correct for anything that reads it before the server does.
+        uploaderId: admin.playFabId || 'Admin',
+        uploaderName: admin.displayName,
+        avatarUrl: admin.avatarUrl || ''   // uploader's own picture, shown on the song row
       };
 
       _setFormLoading(submitBtn, true, 'Saving Song…');
@@ -1538,7 +1556,9 @@
       const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
       const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
       const artist = singer || uploader || "Unknown Artist";
-      const cover = song.avatarUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.avatar || song.photoURL || song.photoUrl || song.imageUrl || song.image || "";
+      // Artwork first, uploader picture last. The chain used to lead with avatarUrl, so a
+      // song that carried both showed the uploader's face instead of its own cover art.
+      const cover = song.coverImageUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.imageUrl || song.image || song.avatarUrl || song.avatar || song.photoURL || song.photoUrl || "";
       const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
 
       const modes     = Array.isArray(song.modes) ? song.modes : [];
