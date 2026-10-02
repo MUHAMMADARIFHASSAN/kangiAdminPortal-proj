@@ -33,60 +33,89 @@ const KangiService = (function () {
      ============================================================ */
   function login(email, password) {
     return new Promise((resolve, reject) => {
-      PlayFabClientSDK.LoginWithEmailAddress(
-        {
+      /* Profile fields come back only when the title enables them under
+         Game Manager > Client Profile Options. Asking for one that is switched
+         off does not quietly omit it — it fails the entire login with
+         RequestViewConstraintParamsNotAllowed (1303). That is what blocked every
+         sign-in here: the request asked for ShowAvatarUrl while the title had
+         "Show Avatar Url" turned off.
+
+         The profile is now requested best-effort, and any view-constraint
+         rejection retries once with no InfoRequestParameters at all. Little is
+         lost, because loadAdminIdentity() reads the name and picture from
+         UserData — the same source the game itself reads. */
+      const _attempt = (infoParams) => {
+        const req = {
           TitleId:  TITLE_ID,
           Email:    email.trim(),
-          Password: password,
-          InfoRequestParameters: {
-            GetPlayerProfile:  true,
-            // AvatarUrl is withheld unless it is asked for explicitly, and the title
-            // must also allow it under Game Manager > Client Profile Options.
-            ProfileConstraints: { ShowDisplayName: true, ShowAvatarUrl: true }
-          }
-        },
-        (result, error) => {
+          Password: password
+        };
+        if (infoParams) req.InfoRequestParameters = infoParams;
+
+        PlayFabClientSDK.LoginWithEmailAddress(req, (result, error) => {
           if (error) {
+            if (infoParams && _isViewConstraintError(error)) {
+              console.warn('[Kangi] Title rejected the requested profile fields; retrying sign-in without them.');
+              _attempt(null);
+              return;
+            }
             reject(_friendlyError(error));
             return;
           }
-          /* Store session basics */
-          session.playFabId   = result.data.PlayFabId;
-          session.email       = email.trim();
-          session.displayName = result.data.InfoResultPayload?.PlayerProfile?.DisplayName || '';
-          session.avatarUrl   = result.data.InfoResultPayload?.PlayerProfile?.AvatarUrl   || '';
-          const ticket        = result.data.SessionTicket;
+          _onAuthenticated(result, email, resolve, reject);
+        });
+      };
 
-          /* Admin check — mirrors AdminManager.CheckAdminStatus() */
-          _checkAdminStatus()
-            .then(isAdmin => {
-              if (!isAdmin) {
-                /* Not an admin — clear session, deny access */
-                _clearSession();
-                reject('Access denied. This account does not have administrator privileges.');
-              } else {
-                // Resolve the name and picture before the session is stored, so a
-                // reload has them without a second round trip.
-                loadAdminIdentity().then(() => {
-                  _saveSessionToStorage(ticket);
-                  resolve({
-                    success:     true,
-                    isAdmin:     true,
-                    playFabId:   session.playFabId,
-                    displayName: session.displayName,
-                    avatarUrl:   session.avatarUrl,
-                    email:       session.email
-                  });
-                });
-              }
-            })
-            .catch(() => {
-              _clearSession();
-              reject('Could not verify account permissions. Please try again.');
-            });
-        }
-      );
+      _attempt({
+        GetPlayerProfile:   true,
+        ProfileConstraints: { ShowDisplayName: true }
+      });
     });
+  }
+
+  /* 1303 means the title disallows one of the requested profile fields. Matched
+     on the code as well as the name so it survives a change of wording. */
+  function _isViewConstraintError(error) {
+    return error?.errorCode === 1303 ||
+           error?.error === 'RequestViewConstraintParamsNotAllowed';
+  }
+
+  /* Shared post-login path: store the session, confirm admin rights, resolve. */
+  function _onAuthenticated(result, email, resolve, reject) {
+    /* Store session basics */
+    session.playFabId   = result.data.PlayFabId;
+    session.email       = email.trim();
+    session.displayName = result.data.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+    session.avatarUrl   = result.data.InfoResultPayload?.PlayerProfile?.AvatarUrl   || '';
+    const ticket        = result.data.SessionTicket;
+
+    /* Admin check — mirrors AdminManager.CheckAdminStatus() */
+    _checkAdminStatus()
+      .then(isAdmin => {
+        if (!isAdmin) {
+          /* Not an admin — clear session, deny access */
+          _clearSession();
+          reject('Access denied. This account does not have administrator privileges.');
+        } else {
+          // Resolve the name and picture before the session is stored, so a
+          // reload has them without a second round trip.
+          loadAdminIdentity().then(() => {
+            _saveSessionToStorage(ticket);
+            resolve({
+              success:     true,
+              isAdmin:     true,
+              playFabId:   session.playFabId,
+              displayName: session.displayName,
+              avatarUrl:   session.avatarUrl,
+              email:       session.email
+            });
+          });
+        }
+      })
+      .catch(() => {
+        _clearSession();
+        reject('Could not verify account permissions. Please try again.');
+      });
   }
 
   /* ============================================================
