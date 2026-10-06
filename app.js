@@ -1180,6 +1180,12 @@
      SOUNDS — Management of Audio Tracks
      ================================================================ */
   let currentAudioSourceMode = 'file';
+  let currentCoverSourceMode = 'file';
+
+  // Object URL backing the cover preview, if the preview is showing a local file. Held so
+  // it can be revoked: every createObjectURL pins its blob in memory until it is released,
+  // and this modal can be opened and re-opened all day.
+  let coverPreviewObjectUrl = null;
 
   function _bindSounds() {
     if (!el.soundsLibrary) return;
@@ -1266,6 +1272,61 @@
       }
     });
 
+    // Cover Artwork Source Toggle
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+    const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+    const coverFileContainer = document.getElementById('coverFileInputContainer');
+    const coverUrlContainer = document.getElementById('coverUrlInputContainer');
+
+    btnCoverFile?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentCoverSourceMode = 'file';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
+      }
+      coverFileContainer?.classList.remove('hidden');
+      coverUrlContainer?.classList.add('hidden');
+      _refreshCoverPreview();
+    });
+
+    btnCoverUrl?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentCoverSourceMode = 'url';
+      btnCoverUrl.classList.add('active');
+      btnCoverUrl.style.background = 'var(--pink)';
+      btnCoverUrl.style.color = '#fff';
+      if (btnCoverFile) {
+        btnCoverFile.classList.remove('active');
+        btnCoverFile.style.background = 'transparent';
+        btnCoverFile.style.color = 'var(--text-muted)';
+      }
+      coverUrlContainer?.classList.remove('hidden');
+      coverFileContainer?.classList.add('hidden');
+      _refreshCoverPreview();
+    });
+
+    const uploadCoverFileInput = document.getElementById('uploadCoverFile');
+    const coverFileNameText = document.getElementById('coverFileName');
+    uploadCoverFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (coverFileNameText) {
+        coverFileNameText.textContent = file ? file.name : 'Select a JPG, PNG or WebP image';
+      }
+      _refreshCoverPreview();
+    });
+
+    document.getElementById('uploadCoverUrl')?.addEventListener('input', _refreshCoverPreview);
+
+    document.getElementById('btnClearCover')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      _clearCoverSelection();
+    });
+
     // Form Submit Handler
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1314,9 +1375,32 @@
         }
       }
 
-      // Cover artwork is no longer a form field either: the admin's own profile
-      // picture is the artwork, which keeps every song tied to a real account.
-      const coverUrl = admin.avatarUrl || '';
+      // Cover artwork. Optional: an admin who skips it gets their own profile picture as
+      // the artwork, which is what every admin-uploaded song used to get unconditionally.
+      //
+      // Uploaded AFTER the audio on purpose — a cover with no track to belong to is an
+      // orphan on the CDN, which is the same order the in-app uploader uses. Unlike the
+      // app, a failure here stops the publish rather than falling back silently: the admin
+      // deliberately picked this artwork, so quietly substituting their avatar would ship
+      // a song with the wrong cover and no indication why.
+      let coverUrl = '';
+      if (currentCoverSourceMode === 'file') {
+        const coverFile = document.getElementById('uploadCoverFile')?.files[0];
+        if (coverFile) {
+          _setFormLoading(submitBtn, true, 'Uploading Cover…');
+          const coverRes = await KangiService.uploadToCloudinary(coverFile, 'image');
+          if (!coverRes.success) {
+            _setFormLoading(submitBtn, false);
+            if (modalAlert) _alert(modalAlert, 'error', (coverRes.error || 'Cover upload failed.') + ' The audio uploaded fine — press Upload Music again to retry.');
+            return;
+          }
+          coverUrl = coverRes.url;
+        }
+      } else {
+        coverUrl = document.getElementById('uploadCoverUrl')?.value.trim() || '';
+      }
+
+      if (!coverUrl) coverUrl = admin.avatarUrl || '';
 
       const modes = [];
       if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
@@ -1419,10 +1503,105 @@
       document.getElementById('audioFileInputContainer')?.classList.remove('hidden');
       document.getElementById('audioUrlInputContainer')?.classList.add('hidden');
     }
+
+    // Cover back to "Upload File" with nothing chosen. form.reset() clears the inputs but
+    // not the toggle state or the preview, both of which live outside the form's control.
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+    if (btnCoverFile) {
+      currentCoverSourceMode = 'file';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
+      }
+      document.getElementById('coverFileInputContainer')?.classList.remove('hidden');
+      document.getElementById('coverUrlInputContainer')?.classList.add('hidden');
+    }
+
+    // Runs after _renderUploadAsIdentity above, so the default preview picks up the
+    // account picture that call just refreshed.
+    _clearCoverSelection();
   }
 
-  /* Shows the admin whose name and picture this upload will carry. The artist and
-     cover-art fields were removed, so without this the substitution is invisible. */
+  /* Paints the cover preview from whichever source is currently selected, falling back to
+     the admin's picture so the thumbnail always shows what the song will actually carry. */
+  function _refreshCoverPreview() {
+    const img = document.getElementById('coverPreview');
+    const fallback = document.getElementById('coverPreviewFallback');
+    const hint = document.getElementById('coverHint');
+    const clearBtn = document.getElementById('btnClearCover');
+    if (!img || !fallback) return;
+
+    // Always release the previous blob before deciding what to show next, or switching
+    // between files leaks one object URL per change.
+    if (coverPreviewObjectUrl) {
+      URL.revokeObjectURL(coverPreviewObjectUrl);
+      coverPreviewObjectUrl = null;
+    }
+
+    let src = '';
+    let chosen = false;
+
+    if (currentCoverSourceMode === 'file') {
+      const file = document.getElementById('uploadCoverFile')?.files[0];
+      if (file) {
+        coverPreviewObjectUrl = URL.createObjectURL(file);
+        src = coverPreviewObjectUrl;
+        chosen = true;
+      }
+    } else {
+      const url = document.getElementById('uploadCoverUrl')?.value.trim();
+      if (url) { src = url; chosen = true; }
+    }
+
+    if (!src) {
+      const admin = KangiService.getAdminIdentity();
+      src = admin.avatarUrl || '';
+    }
+
+    if (hint) {
+      hint.textContent = chosen
+        ? 'This artwork will be used as the song cover.'
+        : 'Optional — your profile picture is used if you leave this empty.';
+    }
+    if (clearBtn) clearBtn.style.display = chosen ? 'inline-flex' : 'none';
+
+    if (src) {
+      // A URL the admin typed may not resolve. Fall back to the icon rather than leaving
+      // a broken image in the form.
+      img.onerror = () => {
+        img.style.display = 'none';
+        fallback.style.display = 'grid';
+      };
+      img.src = src;
+      img.style.display = 'block';
+      fallback.style.display = 'none';
+    } else {
+      img.removeAttribute('src');
+      img.style.display = 'none';
+      fallback.style.display = 'grid';
+    }
+  }
+
+  /* Drops whatever cover was chosen and goes back to the admin-picture default. */
+  function _clearCoverSelection() {
+    const fileInput = document.getElementById('uploadCoverFile');
+    const urlInput = document.getElementById('uploadCoverUrl');
+    const coverFileNameText = document.getElementById('coverFileName');
+
+    if (fileInput) fileInput.value = '';
+    if (urlInput) urlInput.value = '';
+    if (coverFileNameText) coverFileNameText.textContent = 'Select a JPG, PNG or WebP image';
+
+    _refreshCoverPreview();
+  }
+
+  /* Shows the admin whose name this upload will carry. The artist field was removed, so
+     without this the substitution is invisible. */
   function _renderUploadAsIdentity() {
     const admin = KangiService.getAdminIdentity();
 

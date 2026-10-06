@@ -887,18 +887,59 @@
           <input id="uploadSongTitle" type="text" placeholder="e.g. Summer Vibe" required />
         </div>
 
-        <!-- Artist and cover artwork are no longer typed in: both are taken from the
-             signed-in admin account, so what the app shows always matches a real user.
-             Shown here read-only so it is obvious what will be stamped on the song. -->
+        <!-- The artist is not typed in: it is taken from the signed-in admin account, so
+             what the app shows always matches a real user. Shown here read-only so it is
+             obvious what will be stamped on the song. Cover artwork IS choosable, below. -->
         <div class="field-group" style="margin-top:0.75rem;">
-          <label style="margin:0 0 0.35rem;">Artist &amp; Cover</label>
+          <label style="margin:0 0 0.35rem;">Artist</label>
           <div style="display:flex;align-items:center;gap:0.6rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:0.55rem 0.7rem;">
             <img id="uploadAsAvatar" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;display:none;" />
             <span id="uploadAsInitial" style="width:34px;height:34px;border-radius:50%;flex-shrink:0;background:var(--pink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.9rem;">?</span>
             <div style="min-width:0;">
               <div id="uploadAsName" style="font-weight:600;font-size:0.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div>
-              <div style="font-size:0.7rem;color:var(--text-muted);">Your account name and picture are used automatically</div>
+              <div style="font-size:0.7rem;color:var(--text-muted);">Your account name is credited automatically</div>
             </div>
+          </div>
+        </div>
+
+        <!-- Cover Artwork Source Toggle & Inputs.
+             Optional throughout: leaving it empty falls back to the admin's own picture,
+             which is what every admin-uploaded song used to get unconditionally. -->
+        <div class="field-group" style="margin-top:0.75rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+            <label style="margin:0;">Cover Artwork</label>
+            <div class="tab-toggle" style="display:flex;background:rgba(255,255,255,0.06);padding:2px;border-radius:6px;gap:2px;">
+              <button type="button" class="btn-toggle-src active" id="btnCoverSourceFile" style="border:none;background:var(--pink);color:#fff;padding:0.25rem 0.6rem;border-radius:4px;font-size:0.75rem;cursor:pointer;font-weight:600;">Upload File</button>
+              <button type="button" class="btn-toggle-src" id="btnCoverSourceUrl" style="border:none;background:transparent;color:var(--text-muted);padding:0.25rem 0.6rem;border-radius:4px;font-size:0.75rem;cursor:pointer;">Image URL</button>
+            </div>
+          </div>
+
+          <!-- File Upload Option -->
+          <div id="coverFileInputContainer">
+            <div class="file-input-bar" id="coverFileDrop">
+              <input id="uploadCoverFile" type="file" accept="image/*,.jpg,.jpeg,.png,.webp" class="file-input" />
+              <div class="file-input-content">
+                <span class="btn-choose-file">Choose Image</span>
+                <span id="coverFileName" class="file-name-text">Select a JPG, PNG or WebP image</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- URL Input Option -->
+          <div id="coverUrlInputContainer" class="hidden" style="margin-top:0.25rem;">
+            <input id="uploadCoverUrl" type="url" placeholder="https://cdn.example.com/art/cover.jpg" />
+          </div>
+
+          <!-- Preview -->
+          <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.5rem;">
+            <img id="coverPreview" alt="" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;display:none;border:1px solid rgba(255,255,255,0.12);" />
+            <div id="coverPreviewFallback" style="width:46px;height:46px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+            <div style="min-width:0;flex:1;">
+              <div id="coverHint" style="font-size:0.72rem;color:var(--text-muted);">Optional — your profile picture is used if you leave this empty.</div>
+            </div>
+            <button type="button" class="btn btn-ghost" id="btnClearCover" style="display:none;padding:0.25rem 0.6rem;font-size:0.75rem;flex-shrink:0;">Remove</button>
           </div>
         </div>
 
