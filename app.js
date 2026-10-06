@@ -803,7 +803,7 @@
             <div class="recent-name">${_esc(title)}</div>
             <div class="recent-sub">${artistSub}</div>
           </div>
-          <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Available'}</span>
+          <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Approved'}</span>
         </div>`;
     }).join('');
   }
@@ -1731,7 +1731,7 @@
           <span class="song-title-text">${_esc(title)}</span>
           <span class="song-artist-text">${artistDisplay}</span>
           <div style="margin-top:0.35rem;display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;">
-            <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Available'}</span>
+            <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Approved'}</span>
             ${modes.length
               ? modes.map(m => {
                   const d = modeDefs.find(x => x.key === m);
@@ -1741,12 +1741,6 @@
             ${trimLen > 0 ? `<span class="chip chip--teal">Trim ${trimLen.toFixed(1)}s</span>` : ''}
           </div>
         </div>
-
-        ${songUrl ? `
-          <button class="song-preview-btn" data-action="preview" data-url="${_esc(songUrl)}" title="Preview song">
-            <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-          </button>
-        ` : ''}
 
         <div class="song-actions">
           ${isPending ? `
@@ -1812,6 +1806,32 @@
       `;
 
       entry.appendChild(row);
+
+      // Transport bar: play/pause, elapsed, a seek slider you can drag, length.
+      // One <audio> per song so each bar owns its own position; _stopOtherSongAudio
+      // keeps only one of them sounding at a time.
+      if (songUrl) {
+        const player = document.createElement('div');
+        player.className = 'song-player';
+        player.dataset.playerFor = songId;
+        player.dataset.ready = 'false';
+        player.dataset.playing = 'false';
+        player.innerHTML = `
+          <button class="song-player-btn" type="button" data-action="player-toggle"
+                  aria-label="Play ${_esc(title)}" title="Play / pause">
+            <svg class="song-player-icon song-player-icon--play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.5.5 0 00.76.43l11.02-6.86a.5.5 0 000-.86L8.76 4.71a.5.5 0 00-.76.43z"/></svg>
+            <svg class="song-player-icon song-player-icon--pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5h3.2v15H7zM13.8 4.5H17v15h-3.2z"/></svg>
+          </button>
+          <span class="song-player-time" data-player-current>0:00</span>
+          <input class="song-player-seek" type="range" min="0" max="0" step="0.01" value="0"
+                 style="--p:0%" aria-label="Seek through ${_esc(title)}" />
+          <span class="song-player-time" data-player-duration>0:00</span>
+          <audio preload="metadata" src="${_esc(songUrl)}"></audio>
+        `;
+        entry.appendChild(player);
+        _initSongPlayer(player);
+      }
+
       entry.appendChild(panel);
       el.soundsLibrary.appendChild(entry);
     });
@@ -1827,6 +1847,127 @@
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  /* ── Per-song transport bar ────────────────────────────────────────────
+     Every song row owns an <audio> and a slider wired straight to it. The
+     slider only follows the track while nobody is dragging it, otherwise the
+     thumb fights the user mid-scrub. */
+
+  function _stopOtherSongAudio(except) {
+    document.querySelectorAll('.song-player audio').forEach(a => {
+      if (a !== except && !a.paused) a.pause();
+    });
+  }
+
+  function _clearTrimWatcher(aud) {
+    if (aud._trimWatcher) {
+      aud.removeEventListener('timeupdate', aud._trimWatcher);
+      aud._trimWatcher = null;
+    }
+    aud._trimEnd = 0;
+  }
+
+  // currentTime is ignored before metadata lands, so hold the seek until then.
+  function _seekWhenReady(aud, seconds, done) {
+    const go = () => {
+      try { aud.currentTime = seconds; } catch (err) {}
+      if (done) done();
+    };
+    if (aud.readyState >= 1) go();
+    else aud.addEventListener('loadedmetadata', go, { once: true });
+  }
+
+  function _toggleSongAudio(aud) {
+    if (!aud) return;
+    if (aud.paused) {
+      _stopOtherSongAudio(aud);
+      // Resuming past a trimmed clip's end would stop playback instantly —
+      // treat that as a request for the whole track.
+      if (aud._trimEnd && aud.currentTime >= aud._trimEnd - 0.05) _clearTrimWatcher(aud);
+      aud.play().catch(err => {
+        console.error('[Kangi Audio Error]', err);
+        _alert(el.soundsAlert, 'error',
+          'Could not play audio. Please verify the Cloudinary link format or check your browser permissions.');
+      });
+    } else {
+      aud.pause();
+    }
+  }
+
+  function _initSongPlayer(player) {
+    const aud  = player.querySelector('audio');
+    const seek = player.querySelector('.song-player-seek');
+    const curEl = player.querySelector('[data-player-current]');
+    const durEl = player.querySelector('[data-player-duration]');
+    if (!aud || !seek) return;
+
+    let scrubbing = false;
+
+    const paint = (seconds, duration) => {
+      curEl.textContent = _fmtTime(seconds);
+      seek.style.setProperty('--p', (duration > 0 ? (seconds / duration) * 100 : 0) + '%');
+    };
+
+    const onMeta = () => {
+      const d = aud.duration;
+      if (!isFinite(d) || d <= 0) {
+        durEl.textContent = '--:--';
+        return;
+      }
+      seek.max = d;
+      player.dataset.ready = 'true';
+      durEl.textContent = _fmtTime(d);
+      paint(aud.currentTime, d);
+    };
+    aud.addEventListener('loadedmetadata', onMeta);
+    // A cached file can already be past loadedmetadata by the time we bind.
+    if (aud.readyState >= 1) onMeta();
+
+    aud.addEventListener('error', () => {
+      durEl.textContent = '--:--';
+      player.dataset.ready = 'false';
+    });
+
+    aud.addEventListener('timeupdate', () => {
+      if (scrubbing) return;
+      seek.value = aud.currentTime;
+      paint(aud.currentTime, aud.duration || 0);
+    });
+
+    const btn = player.querySelector('.song-player-btn');
+    const label = btn ? btn.getAttribute('aria-label') : '';
+    const setPlaying = (on) => {
+      player.dataset.playing = on ? 'true' : 'false';
+      if (btn && label) btn.setAttribute('aria-label', (on ? 'Pause ' : 'Play ') + label.replace(/^(Play|Pause) /, ''));
+    };
+
+    aud.addEventListener('play',  () => setPlaying(true));
+    aud.addEventListener('pause', () => setPlaying(false));
+    aud.addEventListener('ended', () => {
+      setPlaying(false);
+      seek.value = 0;
+      paint(0, aud.duration || 0);
+    });
+
+    // Dragging updates the readout live; the track only jumps on release so we
+    // are not re-seeking the file on every pixel of movement.
+    seek.addEventListener('pointerdown', () => { scrubbing = true; });
+    seek.addEventListener('input', () => {
+      scrubbing = true;
+      paint(Number(seek.value) || 0, aud.duration || 0);
+    });
+    seek.addEventListener('change', () => {
+      scrubbing = false;
+      _clearTrimWatcher(aud);
+      _seekWhenReady(aud, Number(seek.value) || 0);
+    });
+    seek.addEventListener('keyup', () => { scrubbing = false; });
+    seek.addEventListener('blur',  () => { scrubbing = false; });
+    // A press that ends without changing the value never fires `change`, so
+    // release the scrub lock here too or the bar would stop following playback.
+    seek.addEventListener('pointerup',     () => { scrubbing = false; });
+    seek.addEventListener('pointercancel', () => { scrubbing = false; });
   }
 
   function _initTrimBar(panel, url) {
@@ -1990,24 +2131,18 @@
         return;
       }
 
-      let aud = document.getElementById('song-preview-player');
-      if (!aud) {
-        aud = document.createElement('audio');
-        aud.id = 'song-preview-player';
-        document.body.appendChild(aud);
-      }
+      const aud = btn.closest('.song-entry')?.querySelector('.song-player audio');
+      if (!aud) return;
+
       // Drop any watchers left over from a previous trimmed preview.
-      if (aud._trimWatcher) {
-        aud.removeEventListener('timeupdate', aud._trimWatcher);
-        aud._trimWatcher = null;
-      }
+      _clearTrimWatcher(aud);
       if (aud._headWatcher) {
         aud.removeEventListener('timeupdate', aud._headWatcher);
         aud._headWatcher = null;
       }
 
-      aud.src = url;
-      aud.currentTime = start;
+      _stopOtherSongAudio(aud);
+      _seekWhenReady(aud, start);
 
       // Drive a playhead across the trim bar for THIS song, and hide it on
       // every other open panel — only one clip plays at a time.
@@ -2034,6 +2169,7 @@
       }
 
       if (end > start) {
+        aud._trimEnd = end;
         aud._trimWatcher = () => {
           if (aud.currentTime >= end) {
             aud.pause();
@@ -2089,40 +2225,15 @@
       return;
     }
 
-    if (action === 'preview') {
-      const url = btn.dataset.url;
-      if (!url) {
+    // Cover art and the transport bar's own button drive the same player.
+    if (action === 'preview' || action === 'player-toggle') {
+      const aud = btn.closest('.song-entry')?.querySelector('.song-player audio');
+      if (!aud) {
         _alert(el.soundsAlert, 'warning', 'No audio URL found for this song.');
         return;
       }
-      
-      let aud = document.getElementById('song-preview-player');
-      if (!aud) {
-        aud = document.createElement('audio');
-        aud.id = 'song-preview-player';
-        document.body.appendChild(aud);
-      }
-      
-      if (aud.dataset.currentUrl === url && !aud.paused) {
-        aud.pause();
-        /* reset play icon */
-        document.querySelectorAll('.song-preview-btn').forEach(b => {
-          b.innerHTML = `<svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>`;
-        });
-      } else {
-        aud.src = url;
-        aud.dataset.currentUrl = url;
-        aud.currentTime = 0;
-        aud.play().then(() => {
-          document.querySelectorAll('.song-preview-btn').forEach(b => {
-            b.innerHTML = `<svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>`;
-          });
-          btn.innerHTML = `<svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>`;
-        }).catch((err) => {
-          console.error('[Kangi Audio Error]', err);
-          _alert(el.soundsAlert, 'error', 'Could not play audio. Please verify the Cloudinary link format or check your browser permissions.');
-        });
-      }
+      _toggleSongAudio(aud);
+      return;
     }
 
     if (action === 'approve') {
