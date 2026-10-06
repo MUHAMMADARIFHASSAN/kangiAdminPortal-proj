@@ -1805,8 +1805,6 @@
         </div>
       `;
 
-      entry.appendChild(row);
-
       // Transport bar: play/pause, elapsed, a seek slider you can drag, length.
       // One <audio> per song so each bar owns its own position; _stopOtherSongAudio
       // keeps only one of them sounding at a time.
@@ -1828,10 +1826,12 @@
           <span class="song-player-time" data-player-duration>0:00</span>
           <audio preload="metadata" src="${_esc(songUrl)}"></audio>
         `;
-        entry.appendChild(player);
+        // Sits in the row itself, between the song details and the buttons.
+        row.insertBefore(player, row.querySelector('.song-actions'));
         _initSongPlayer(player);
       }
 
+      entry.appendChild(row);
       entry.appendChild(panel);
       el.soundsLibrary.appendChild(entry);
     });
