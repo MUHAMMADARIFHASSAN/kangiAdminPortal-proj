@@ -206,7 +206,10 @@
     _bindUserModals();
     _bindMessages();
 
-    // Auto-restore session if saved in localStorage
+    // Sessions are not persisted across page loads, so this always comes back null
+    // and the login view stays up. The call is kept because it also clears any
+    // session written by an older build of the dashboard. See restoreSession() in
+    // service.js for why a reload must not restore a PlayFab ticket.
     const savedSession = KangiService.restoreSession();
     if (savedSession) {
       _onLoginSuccess(savedSession);

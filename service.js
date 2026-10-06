@@ -97,8 +97,10 @@ const KangiService = (function () {
           _clearSession();
           reject('Access denied. This account does not have administrator privileges.');
         } else {
-          // Resolve the name and picture before the session is stored, so a
-          // reload has them without a second round trip.
+          // Resolve the name and picture before the login resolves. The session is
+          // no longer persisted, so this is not about surviving a reload - it is
+          // what fills session.displayName / avatarUrl, which getAdminIdentity()
+          // stamps onto every song this admin uploads.
           loadAdminIdentity().then(() => {
             _saveSessionToStorage(ticket);
             resolve({
@@ -237,51 +239,41 @@ const KangiService = (function () {
 
   const SESSION_STORAGE_KEY = 'kangi_admin_session_v2';
 
+  /* The admin session is deliberately NOT persisted across page loads.
+     ---------------------------------------------------------------------------
+     This used to write the PlayFab sessionTicket into localStorage and sign the
+     admin straight back in on reload. The ticket expires server-side long before
+     anything here notices, and nothing validated it on the way back in — so a
+     reload would restore a dead ticket, render the full dashboard as though the
+     admin were signed in, and then fail every PlayFab call it made. That is what
+     made songs and QR data silently stop loading: the UI looked authenticated
+     while the server was rejecting it.
+
+     A reload now signs the admin out and shows the login page, which is both what
+     the dashboard should do with a privileged account and the only state that
+     cannot be stale.
+
+     Both functions are kept rather than deleted: they are part of the exported
+     surface and are called from the login flow and app boot. */
   function _saveSessionToStorage(ticket) {
-    try {
-      const data = {
-        playFabId:     session.playFabId,
-        email:         session.email,
-        displayName:   session.displayName,
-        avatarUrl:     session.avatarUrl,
-        sessionTicket: ticket || (typeof PlayFab !== 'undefined' && PlayFab._internalSettings && PlayFab._internalSettings.sessionTicket),
-        timestamp:     Date.now()
-      };
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {}
+    // Intentionally does not persist. Kept so the login flow's call site stays
+    // honest about where a session would have been written.
+    void ticket;
+    _purgeStoredSession();
   }
 
   function restoreSession() {
-    try {
-      const saved = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      if (parsed && parsed.playFabId && parsed.sessionTicket) {
-        if (typeof PlayFab !== 'undefined' && PlayFab._internalSettings) {
-          PlayFab._internalSettings.sessionTicket = parsed.sessionTicket;
-        }
-        session.playFabId   = parsed.playFabId;
-        session.email       = parsed.email || '';
-        session.displayName = parsed.displayName || '';
-        session.avatarUrl   = parsed.avatarUrl || '';
-        session.isAdmin     = true;
-
-        // Restored from storage, so the cached copy may be stale - the admin could
-        // have changed their picture in the game since. Refresh in the background;
-        // the stored values are good enough to render with until it lands.
-        loadAdminIdentity().catch(() => {});
-
-        return {
-          success:     true,
-          isAdmin:     true,
-          playFabId:   parsed.playFabId,
-          displayName: parsed.displayName,
-          avatarUrl:   parsed.avatarUrl || '',
-          email:       parsed.email
-        };
-      }
-    } catch (e) {}
+    // Never restores. Any session written by an older build of the dashboard is
+    // cleared here, so admins carrying one are flushed out on their next load
+    // instead of being let in on a ticket nothing can validate.
+    _purgeStoredSession();
     return null;
+  }
+
+  function _purgeStoredSession() {
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (e) {}
   }
 
   function _clearSession() {
