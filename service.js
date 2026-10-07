@@ -378,21 +378,49 @@ const KangiService = (function () {
   /* Delete a song from server catalog */
   function deleteSong(songId) { return _callVideoScript('deleteSong', { adminData: { songId } }); }
 
-  /* Submit / Upload a new song using existing CloudScript functions (submitSong + approveSong) */
+  /* Submit / Upload a new song using existing CloudScript functions (submitSong + approveSong)
+     submitSong always stores the song as pending — CloudScript forces isPending = true and
+     ignores whatever the caller sent — so "Publish immediately" is really a second call to
+     approveSong. That second call can fail on its own, and its failure used to vanish:
+     approveSong reports a missing song as { success:false, message:... } with no `error`
+     key, so _callVideoScript resolves rather than rejects, and the try/catch here never
+     ran. The upload then reported success while the song sat in Pending.
+
+     The result is now inspected, retried once, and reported back to the caller. The retry
+     is deliberate: submitSong and approveSong are separate CloudScript round trips that
+     read-modify-write the same Title Internal Data key, so the likeliest failure is the
+     approve reading the catalog before the submit's write has landed. */
   async function addSong(songData, autoApprove = true) {
     const res = await _callVideoScript('submitSong', { songData });
     if (!res || res.success === false) {
       throw new Error(res?.error || res?.message || 'Failed to submit song.');
     }
-    // If autoApprove is enabled (Publish immediately), approve it right away
-    if (autoApprove && songData.SongId) {
-      try {
-        await approveSong(songData.SongId);
-      } catch (eApprove) {
-        console.warn('[Kangi] Song submitted, auto-approve warning:', eApprove);
-      }
+
+    if (!autoApprove || !songData.SongId) {
+      return { ...res, approved: false, autoApproveRequested: false };
     }
-    return res;
+
+    const _tryApprove = async () => {
+      try {
+        const ar = await approveSong(songData.SongId);
+        // A resolved call is not a successful one — check the flag, not the promise.
+        if (ar && ar.success) return { ok: true };
+        return { ok: false, error: ar?.error || ar?.message || 'Server did not confirm the approval.' };
+      } catch (eApprove) {
+        return { ok: false, error: eApprove?.message || eApprove || 'Approval call failed.' };
+      }
+    };
+
+    let attempt = await _tryApprove();
+    if (!attempt.ok) {
+      await new Promise(r => setTimeout(r, 600));
+      attempt = await _tryApprove();
+    }
+
+    if (!attempt.ok) {
+      console.warn('[Kangi] Song submitted but auto-approve failed:', attempt.error);
+    }
+    return { ...res, approved: attempt.ok, autoApproveRequested: true, approveError: attempt.ok ? null : attempt.error };
   }
 
   /* ============================================================

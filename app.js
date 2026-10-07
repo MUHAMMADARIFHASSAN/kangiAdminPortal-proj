@@ -1464,11 +1464,28 @@
         _setFormLoading(submitBtn, false);
 
         if (res && res.success !== false) {
-          if (modalAlert) _alert(modalAlert, 'success', '🎵 Song successfully uploaded and added to library!');
-          setTimeout(() => {
-            modal.classList.add('hidden');
+          // "Publish immediately" is a second server call that can fail on its own. Say
+          // which of the two actually happened rather than claiming success for both,
+          // or the admin walks away believing a song is live while it sits in Pending.
+          if (res.autoApproveRequested && !res.approved) {
+            if (modalAlert) _alert(modalAlert, 'warning',
+              'Song uploaded, but publishing it failed' +
+              (res.approveError ? ' (' + res.approveError + ')' : '') +
+              '. It is waiting under Pending — press Approve on it to publish.');
+            // Left open on purpose: this needs reading, and the library behind it is
+            // refreshed so the pending row is already there once the modal is closed.
             _loadSongsData();
-          }, 1200);
+          } else {
+            if (modalAlert) _alert(modalAlert, 'success',
+              res.autoApproveRequested
+                ? '🎵 Song uploaded and published to the library!'
+                : '🎵 Song uploaded — it is waiting under Pending for approval.');
+            setTimeout(() => {
+              modal.classList.add('hidden');
+              modal.style.display = 'none';
+              _loadSongsData();
+            }, 1200);
+          }
         } else {
           if (modalAlert) _alert(modalAlert, 'error', res?.error || res?.message || 'Failed to save song to server.');
         }
@@ -2248,7 +2265,8 @@
           _alert(el.soundsAlert, 'success', notifMsg);
           await _loadSongsData();
         } else {
-          _alert(el.soundsAlert, 'error', res.error || 'Failed to approve song.');
+          // approveSong reports failure under `message`, not `error`.
+          _alert(el.soundsAlert, 'error', res.error || res.message || 'Failed to approve song.');
         }
       } catch (err) {
         _alert(el.soundsAlert, 'error', err);
