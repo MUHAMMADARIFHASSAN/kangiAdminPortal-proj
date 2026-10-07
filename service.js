@@ -719,8 +719,9 @@ const KangiService = (function () {
 
   /* Upload file to Cloudinary using unsigned upload
      Supports resourceType: 'auto', 'image', 'video', 'raw' (default: 'auto')
+     Supports optional onProgress callback: onProgress(percentage, loadedBytes, totalBytes)
      Returns { success: true, url: "https://..." } or { success: false, error: "..." } */
-  function uploadToCloudinary(file, resourceType = 'auto') {
+  function uploadToCloudinary(file, resourceType = 'auto', onProgress = null) {
     return new Promise((resolve) => {
       const config = getCloudinaryConfig();
       if (!config || !config.cloudName || !config.uploadPreset) {
@@ -735,25 +736,46 @@ const KangiService = (function () {
       const type = resourceType || 'auto';
       const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/${type}/upload`;
 
-      fetch(uploadUrl, { method: 'POST', body: formData })
-        .then(response => {
-          if (!response.ok) {
-            return response.text().then(text => {
-              throw new Error(`Upload failed: ${response.status} ${text.substring(0, 100)}`);
-            });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', uploadUrl, true);
+
+      if (xhr.upload && typeof onProgress === 'function') {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            const percent = Math.min(100, Math.round((e.loaded / e.total) * 100));
+            onProgress(percent, e.loaded, e.total);
           }
-          return response.json();
-        })
-        .then(data => {
-          if (data.secure_url) {
-            resolve({ success: true, url: data.secure_url });
+        };
+      }
+
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText || '{}');
+          if (xhr.status >= 200 && xhr.status < 300) {
+            if (data.secure_url) {
+              if (typeof onProgress === 'function') onProgress(100, file.size || 1, file.size || 1);
+              resolve({ success: true, url: data.secure_url, data: data });
+            } else {
+              resolve({ success: false, error: 'No URL returned from Cloudinary.' });
+            }
           } else {
-            resolve({ success: false, error: 'No URL returned from Cloudinary.' });
+            const msg = data?.error?.message || `Upload failed with status ${xhr.status}`;
+            resolve({ success: false, error: msg });
           }
-        })
-        .catch(err => {
-          resolve({ success: false, error: err.message || 'Upload failed.' });
-        });
+        } catch (err) {
+          resolve({ success: false, error: `Invalid response from Cloudinary (${xhr.status}): ${err.message}` });
+        }
+      };
+
+      xhr.onerror = () => {
+        resolve({ success: false, error: 'Network error occurred while uploading to Cloudinary.' });
+      };
+
+      xhr.ontimeout = () => {
+        resolve({ success: false, error: 'Upload request timed out.' });
+      };
+
+      xhr.send(formData);
     });
   }
 

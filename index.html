@@ -134,7 +134,8 @@
       </button>
       <button class="nav-item" data-view="sounds">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
-        Sounds
+        <span>Sounds</span>
+        <span id="soundsNavBadge" class="nav-upload-badge hidden">0%</span>
       </button>
       <button class="nav-item" data-view="redeem">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
@@ -1007,6 +1008,24 @@
       </form>
     </div>
   </div>
+</div>
+
+<!-- Background Upload Floating Pill Indicator -->
+<div id="bgUploadFloatingPill" class="bg-upload-pill hidden" title="Click to view in Sounds Library">
+  <div class="bg-upload-pill-icon">
+    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+  </div>
+  <div class="bg-upload-pill-info">
+    <div class="bg-upload-pill-title" id="bgUploadPillTitle">Uploading Track…</div>
+    <div class="bg-upload-pill-meta">
+      <span id="bgUploadPillStatus">Uploading audio…</span>
+      <span id="bgUploadPillPercent">0%</span>
+    </div>
+    <div class="bg-upload-pill-track">
+      <div class="bg-upload-pill-fill" id="bgUploadPillFill" style="width:0%;"></div>
+    </div>
+  </div>
+  <button type="button" class="bg-upload-pill-action" id="btnViewBgUpload">View</button>
 </div>
 
 <script src="service.js"></script>

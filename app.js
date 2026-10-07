@@ -164,6 +164,7 @@
   const state = { 
     nfts: [], 
     songs: [], 
+    activeMusicUploads: [],
     songFilter: 'all',
     allUsers: [],
     filteredUsers: [],
@@ -205,6 +206,15 @@
     _bindUserSearch();
     _bindUserModals();
     _bindMessages();
+
+    // Floating background upload pill click to switch to sounds view
+    document.getElementById('bgUploadFloatingPill')?.addEventListener('click', () => {
+      _switchView('sounds');
+    });
+    document.getElementById('btnViewBgUpload')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _switchView('sounds');
+    });
 
     // Sessions are not persisted across page loads, so this always comes back null
     // and the login view stays up. The call is kept because it also clears any
@@ -672,6 +682,8 @@
     if (name === 'messages') {
       await _loadMessages();
     }
+
+    _updateGlobalUploadBadge();
   }
 
   /* ================================================================
@@ -1330,23 +1342,14 @@
       _clearCoverSelection();
     });
 
-    // Form Submit Handler
-    form?.addEventListener('submit', async (e) => {
+    // Form Submit Handler — Closes modal immediately & uploads in background
+    form?.addEventListener('submit', (e) => {
       e.preventDefault();
       if (modalAlert) _hideAlert(modalAlert);
 
       const titleInput = document.getElementById('uploadSongTitle');
-      const submitBtn = document.getElementById('submitUploadSongBtn');
-
-      // Who is actually uploading. Resolved from the signed-in PlayFab account via the
-      // same UserData keys the game reads (see loadAdminIdentity in service.js), so the
-      // name and picture stamped on the song are the ones the app already shows for
-      // this account - not the old hardcoded "Dashboard Admin".
       const admin = KangiService.getAdminIdentity();
-
       const title = titleInput?.value.trim();
-
-      // Artist is no longer a form field: the song is credited to the admin uploading it.
       const artist = admin.displayName;
 
       if (!title) {
@@ -1354,56 +1357,27 @@
         return;
       }
 
-      let audioUrl = '';
+      let audioFile = null;
+      let audioUrlInput = '';
       if (currentAudioSourceMode === 'file') {
-        const audioFile = uploadAudioFileInput?.files[0];
+        audioFile = uploadAudioFileInput?.files[0];
         if (!audioFile) {
           if (modalAlert) _alert(modalAlert, 'error', 'Please select an audio file to upload or switch to Audio URL.');
           return;
         }
-        _setFormLoading(submitBtn, true, 'Uploading Audio…');
-        const uploadRes = await KangiService.uploadToCloudinary(audioFile, 'auto');
-        if (!uploadRes.success) {
-          _setFormLoading(submitBtn, false);
-          if (modalAlert) _alert(modalAlert, 'error', uploadRes.error || 'Audio upload failed. Check Cloudinary settings.');
-          return;
-        }
-        audioUrl = uploadRes.url;
       } else {
-        const audioUrlInput = document.getElementById('uploadAudioUrl');
-        audioUrl = audioUrlInput?.value.trim();
-        if (!audioUrl) {
+        audioUrlInput = document.getElementById('uploadAudioUrl')?.value.trim();
+        if (!audioUrlInput) {
           if (modalAlert) _alert(modalAlert, 'error', 'Please enter a valid Audio URL.');
           return;
         }
       }
 
-      // Cover artwork. Optional: an admin who skips it gets their own profile picture as
-      // the artwork, which is what every admin-uploaded song used to get unconditionally.
-      //
-      // Uploaded AFTER the audio on purpose — a cover with no track to belong to is an
-      // orphan on the CDN, which is the same order the in-app uploader uses. Unlike the
-      // app, a failure here stops the publish rather than falling back silently: the admin
-      // deliberately picked this artwork, so quietly substituting their avatar would ship
-      // a song with the wrong cover and no indication why.
-      let coverUrl = '';
-      if (currentCoverSourceMode === 'file') {
-        const coverFile = document.getElementById('uploadCoverFile')?.files[0];
-        if (coverFile) {
-          _setFormLoading(submitBtn, true, 'Uploading Cover…');
-          const coverRes = await KangiService.uploadToCloudinary(coverFile, 'image');
-          if (!coverRes.success) {
-            _setFormLoading(submitBtn, false);
-            if (modalAlert) _alert(modalAlert, 'error', (coverRes.error || 'Cover upload failed.') + ' The audio uploaded fine — press Upload Music again to retry.');
-            return;
-          }
-          coverUrl = coverRes.url;
-        }
-      } else {
-        coverUrl = document.getElementById('uploadCoverUrl')?.value.trim() || '';
-      }
+      const coverFile = currentCoverSourceMode === 'file' ? document.getElementById('uploadCoverFile')?.files[0] : null;
+      const coverUrlInput = currentCoverSourceMode === 'url' ? document.getElementById('uploadCoverUrl')?.value.trim() : '';
 
-      if (!coverUrl) coverUrl = admin.avatarUrl || '';
+      const coverPreviewEl = document.getElementById('coverPreview');
+      const coverPreviewSrc = (coverPreviewEl && coverPreviewEl.style.display !== 'none') ? coverPreviewEl.src : (coverUrlInput || '');
 
       const modes = [];
       if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
@@ -1412,87 +1386,28 @@
 
       const isPending = !document.getElementById('uploadSongAutoApprove')?.checked;
 
-      // Field names matter here, and they are not interchangeable.
-      //
-      // The dashboard reads songs through a tolerant fallback chain, so it looked correct
-      // whichever key the title was under. Unity does not: it parses with JsonUtility,
-      // which is case-sensitive and silently discards unrecognised fields, and it reads
-      // `songTitle`. Sending only `SongName` meant the app received no title at all and
-      // fell back to naming the track after the downloaded audio file - the reason an
-      // admin-uploaded song showed a file name in the app instead of the title typed here.
-      //
-      // So each value is written under BOTH names: the one Unity reads, and the legacy
-      // alias the dashboard's own lists were built against. The app also folds the legacy
-      // spellings itself (SongData.Normalize in Unity), which is what repairs songs
-      // uploaded before this fix; writing them correctly here means new records are
-      // already right without relying on that. CloudScript is deliberately untouched.
-      const songData = {
-        SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+      // Close modal immediately so user can navigate freely to other tabs!
+      _closeModal();
 
-        songTitle: title,          // Unity: SongData.songTitle  -> the song row label
-        SongName: title,           // legacy alias, still read by the dashboard lists
-
-        Singer: artist,            // Unity: SongData.Singer     -> the credit line
-        artistName: artist,        // Unity falls back to this when Singer is empty
-
-        SongUrl: audioUrl,         // Unity: tried first by GetAudioUrl()
-        songLink: audioUrl,        // Unity: its fallback. The app's own uploader writes both.
-
-        coverImageUrl: coverUrl,   // album art: the chosen artwork, else the admin's picture
-        AvatarUrl: coverUrl,       // legacy alias for the same thing
-
-        uploadDate: _todayStamp(), // dd-MMM-yy, matching what the Unity uploader stamps
-
-        modes: modes.length ? modes : ['mirror_mii', 'kawaii_mode'],
-        trimStart: 0,
-        trimEnd: 0,
-        isPending: isPending,
-
-        // The uploader is a real account, not a label. CloudScript overwrites uploaderId
-        // with the caller's PlayFab ID regardless - which is this same admin - but setting
-        // it here keeps the record correct for anything that reads it before the server does.
-        uploaderId: admin.playFabId || 'Admin',
-        uploaderName: admin.displayName,
-        avatarUrl: admin.avatarUrl || ''   // uploader's own picture, shown on the song row
-      };
-
-      _setFormLoading(submitBtn, true, 'Saving Song…');
-
-      try {
-        const autoApprove = !isPending;
-        const res = await KangiService.addSong(songData, autoApprove);
-        _setFormLoading(submitBtn, false);
-
-        if (res && res.success !== false) {
-          // "Publish immediately" is a second server call that can fail on its own. Say
-          // which of the two actually happened rather than claiming success for both,
-          // or the admin walks away believing a song is live while it sits in Pending.
-          if (res.autoApproveRequested && !res.approved) {
-            if (modalAlert) _alert(modalAlert, 'warning',
-              'Song uploaded, but publishing it failed' +
-              (res.approveError ? ' (' + res.approveError + ')' : '') +
-              '. It is waiting under Pending — press Approve on it to publish.');
-            // Left open on purpose: this needs reading, and the library behind it is
-            // refreshed so the pending row is already there once the modal is closed.
-            _loadSongsData();
-          } else {
-            if (modalAlert) _alert(modalAlert, 'success',
-              res.autoApproveRequested
-                ? '🎵 Song uploaded and published to the library!'
-                : '🎵 Song uploaded — it is waiting under Pending for approval.');
-            setTimeout(() => {
-              modal.classList.add('hidden');
-              modal.style.display = 'none';
-              _loadSongsData();
-            }, 1200);
-          }
-        } else {
-          if (modalAlert) _alert(modalAlert, 'error', res?.error || res?.message || 'Failed to save song to server.');
-        }
-      } catch (err) {
-        _setFormLoading(submitBtn, false);
-        if (modalAlert) _alert(modalAlert, 'error', err?.message || err || 'Failed to save song to server.');
-      }
+      // Launch background upload with live progress bar in Music / Sounds tab
+      _startBackgroundSongUpload({
+        id: 'upload_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        title,
+        artist,
+        admin,
+        audioSourceMode: currentAudioSourceMode,
+        audioFile,
+        audioUrlInput,
+        coverSourceMode: currentCoverSourceMode,
+        coverFile,
+        coverUrlInput,
+        coverPreview: coverPreviewSrc,
+        modes,
+        isPending,
+        progress: 0,
+        status: 'uploading',
+        statusText: 'Preparing upload…'
+      });
     });
   }
 
@@ -1648,6 +1563,276 @@
     }
   }
 
+  /* ============================================================
+     BACKGROUND MUSIC UPLOAD MANAGER & REAL-TIME PROGRESS TRACKING
+     ============================================================ */
+
+  function _removeActiveUpload(jobId) {
+    if (!state.activeMusicUploads) return;
+    state.activeMusicUploads = state.activeMusicUploads.filter(j => j.id !== jobId);
+    const elRow = document.getElementById(`upload-row-${jobId}`);
+    if (elRow) elRow.remove();
+    _updateGlobalUploadBadge();
+    if (state.activeMusicUploads.length === 0 && (!state.songs || state.songs.length === 0)) {
+      _renderSongsList();
+    }
+  }
+
+  function _createUploadSongElement(job) {
+    const entry = document.createElement('div');
+    entry.className = 'song-entry uploading-song-entry';
+    entry.id = `upload-row-${job.id}`;
+
+    const isError = job.status === 'error';
+    const isSuccess = job.status === 'success';
+
+    entry.innerHTML = `
+      <div class="song-item uploading-song-item ${isError ? 'upload-item--error' : ''} ${isSuccess ? 'upload-item--success' : ''}">
+        <div class="song-cover" style="position:relative;overflow:hidden;display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);">
+          ${job.coverPreview ? `
+            <img src="${_esc(job.coverPreview)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';" />
+            <div style="display:none;width:100%;height:100%;place-items:center;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          ` : `
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          `}
+          ${!isError && !isSuccess ? `
+            <div class="upload-cover-overlay">
+              <div class="spinner-small"></div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="song-meta" style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+            <span class="song-title-text" style="font-weight:700;">${_esc(job.title)}</span>
+            <span class="chip ${isError ? 'chip--red' : (isSuccess ? 'chip--green' : 'chip--pink')}" id="upload-chip-${job.id}">
+              ${isError ? 'Failed' : (isSuccess ? 'Done' : `${job.progress}%`)}
+            </span>
+          </div>
+          <span class="song-artist-text">${_esc(job.artist)} <span style="opacity:0.65;font-weight:normal;">• Uploading to catalog…</span></span>
+
+          <!-- Progress Bar -->
+          <div class="upload-progress-container" style="margin-top:0.5rem;">
+            <div class="upload-progress-fill" id="upload-fill-${job.id}" style="width:${job.progress}%;${isError ? 'background:#ef4444;' : (isSuccess ? 'background:#10b981;' : '')}"></div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.35rem;font-size:0.75rem;">
+            <span id="upload-status-${job.id}" style="color:${isError ? '#ef4444' : 'var(--text-muted)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              ${_esc(job.statusText || 'Uploading…')}
+            </span>
+            <span id="upload-percent-${job.id}" style="font-weight:600;color:${isError ? '#ef4444' : '#fff'};margin-left:0.5rem;">
+              ${isError ? 'Error' : `${job.progress}%`}
+            </span>
+          </div>
+
+          ${isError ? `
+            <div style="margin-top:0.4rem;display:flex;gap:0.5rem;">
+              <button type="button" class="btn btn-ghost btn-xs" data-dismiss-upload="${job.id}" style="padding:0.2rem 0.5rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;">Dismiss</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
+    entry.querySelector(`[data-dismiss-upload="${job.id}"]`)?.addEventListener('click', () => {
+      _removeActiveUpload(job.id);
+    });
+
+    return entry;
+  }
+
+  function _updateUploadProgressUI(job) {
+    const fill = document.getElementById(`upload-fill-${job.id}`);
+    const percent = document.getElementById(`upload-percent-${job.id}`);
+    const chip = document.getElementById(`upload-chip-${job.id}`);
+    const status = document.getElementById(`upload-status-${job.id}`);
+
+    if (fill) fill.style.width = `${job.progress}%`;
+    if (percent) percent.textContent = job.status === 'error' ? 'Error' : `${job.progress}%`;
+    if (chip && job.status !== 'error' && job.status !== 'success') {
+      chip.textContent = `${job.progress}%`;
+    }
+    if (status) status.textContent = job.statusText;
+
+    _updateGlobalUploadBadge();
+  }
+
+  function _updateGlobalUploadBadge() {
+    const navBadge = document.getElementById('soundsNavBadge');
+    const pill = document.getElementById('bgUploadFloatingPill');
+    const pillTitle = document.getElementById('bgUploadPillTitle');
+    const pillStatus = document.getElementById('bgUploadPillStatus');
+    const pillPercent = document.getElementById('bgUploadPillPercent');
+    const pillFill = document.getElementById('bgUploadPillFill');
+
+    const uploads = state.activeMusicUploads || [];
+    const activeJob = uploads.find(j => j.status === 'uploading' || j.status === 'saving') || uploads[0];
+
+    if (!activeJob) {
+      if (navBadge) navBadge.classList.add('hidden');
+      if (pill) pill.classList.add('hidden');
+      return;
+    }
+
+    // Sidebar badge
+    if (navBadge) {
+      navBadge.classList.remove('hidden');
+      navBadge.textContent = `${activeJob.progress}%`;
+    }
+
+    // Floating pill visible across tabs
+    if (pill) {
+      pill.classList.remove('hidden');
+      if (pillTitle) pillTitle.textContent = activeJob.title || 'Uploading Track…';
+      if (pillStatus) pillStatus.textContent = activeJob.statusText || 'Uploading…';
+      if (pillPercent) pillPercent.textContent = `${activeJob.progress}%`;
+      if (pillFill) pillFill.style.width = `${activeJob.progress}%`;
+    }
+  }
+
+  async function _startBackgroundSongUpload(job) {
+    state.activeMusicUploads = state.activeMusicUploads || [];
+    state.activeMusicUploads.unshift(job);
+
+    // If currently on Sounds view, render the new upload row immediately
+    _renderSongsList();
+    _updateGlobalUploadBadge();
+
+    try {
+      let audioUrl = '';
+
+      // 1. Upload Audio
+      if (job.audioSourceMode === 'file') {
+        job.statusText = 'Uploading audio file (0%)…';
+        job.progress = 0;
+        _updateUploadProgressUI(job);
+
+        const hasCoverFile = job.coverSourceMode === 'file' && !!job.coverFile;
+        const audioWeight = hasCoverFile ? 0.75 : 0.88;
+
+        const uploadRes = await KangiService.uploadToCloudinary(job.audioFile, 'auto', (pct) => {
+          job.progress = Math.min(Math.round(pct * audioWeight), 88);
+          job.statusText = `Uploading audio file (${pct}%)…`;
+          _updateUploadProgressUI(job);
+        });
+
+        if (!uploadRes.success) {
+          throw new Error(uploadRes.error || 'Audio upload failed. Check Cloudinary settings.');
+        }
+        audioUrl = uploadRes.url;
+      } else {
+        audioUrl = job.audioUrlInput;
+        job.progress = 40;
+        _updateUploadProgressUI(job);
+      }
+
+      // 2. Upload Cover (if provided)
+      let coverUrl = '';
+      if (job.coverSourceMode === 'file' && job.coverFile) {
+        job.statusText = 'Uploading cover artwork (0%)…';
+        job.progress = 75;
+        _updateUploadProgressUI(job);
+
+        const coverRes = await KangiService.uploadToCloudinary(job.coverFile, 'image', (pct) => {
+          job.progress = Math.min(92, 75 + Math.round(pct * 0.17));
+          job.statusText = `Uploading cover artwork (${pct}%)…`;
+          _updateUploadProgressUI(job);
+        });
+
+        if (!coverRes.success) {
+          throw new Error(coverRes.error || 'Cover artwork upload failed.');
+        }
+        coverUrl = coverRes.url;
+      } else {
+        coverUrl = job.coverUrlInput || '';
+      }
+
+      if (!coverUrl) coverUrl = job.admin.avatarUrl || '';
+
+      // 3. Save Song to CloudScript
+      job.progress = 94;
+      job.statusText = 'Saving song to catalog…';
+      _updateUploadProgressUI(job);
+
+      const songData = {
+        SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        songTitle: job.title,
+        SongName: job.title,
+        Singer: job.artist,
+        artistName: job.artist,
+        SongUrl: audioUrl,
+        songLink: audioUrl,
+        coverImageUrl: coverUrl,
+        AvatarUrl: coverUrl,
+        uploadDate: _todayStamp(),
+        modes: job.modes.length ? job.modes : ['mirror_mii', 'kawaii_mode'],
+        trimStart: 0,
+        trimEnd: 0,
+        isPending: job.isPending,
+        uploaderId: job.admin.playFabId || 'Admin',
+        uploaderName: job.admin.displayName,
+        avatarUrl: job.admin.avatarUrl || ''
+      };
+
+      const autoApprove = !job.isPending;
+      const res = await KangiService.addSong(songData, autoApprove);
+
+      if (!res || res.success === false) {
+        throw new Error(res?.error || res?.message || 'Failed to save song to server.');
+      }
+
+      // 4. Completed!
+      job.progress = 100;
+      job.status = 'success';
+      job.statusText = (res.autoApproveRequested && !res.approved)
+        ? 'Uploaded (Waiting in Pending)'
+        : '✓ Uploaded & Published!';
+      _updateUploadProgressUI(job);
+
+      // Refresh catalog list so the newly uploaded song appears in the library
+      await _loadSongsData();
+
+      if (el.soundsAlert) {
+        _alert(el.soundsAlert, 'success', `🎵 "${job.title}" successfully uploaded and added to the library!`);
+      }
+
+      // Keep success card visible for 3.5 seconds before removing from active uploads
+      setTimeout(() => {
+        _removeActiveUpload(job.id);
+      }, 3500);
+
+    } catch (err) {
+      console.error('[Kangi] Upload error:', err);
+      job.status = 'error';
+      job.statusText = err?.message || err || 'Upload failed.';
+      _updateUploadProgressUI(job);
+
+      const row = document.getElementById(`upload-row-${job.id}`);
+      if (row) {
+        const item = row.querySelector('.uploading-song-item');
+        if (item) item.classList.add('upload-item--error');
+        const chip = document.getElementById(`upload-chip-${job.id}`);
+        if (chip) {
+          chip.className = 'chip chip--red';
+          chip.textContent = 'Failed';
+        }
+        const fill = document.getElementById(`upload-fill-${job.id}`);
+        if (fill) fill.style.background = '#ef4444';
+        const percent = document.getElementById(`upload-percent-${job.id}`);
+        if (percent) {
+          percent.style.color = '#ef4444';
+          percent.textContent = 'Error';
+        }
+      }
+
+      if (el.soundsAlert) {
+        _alert(el.soundsAlert, 'error', `Upload failed for "${job.title}": ${err?.message || err}`);
+      }
+    }
+  }
+
   function _setSongFilter(filter) {
     state.songFilter = filter;
     document.querySelectorAll('#soundsView .btn').forEach(btn => btn.classList.remove('active'));
@@ -1661,11 +1846,14 @@
 
   async function _loadSongsData() {
     if (!el.soundsLibrary) return;
-    el.soundsLibrary.innerHTML = `
-      <div class="empty-state">
-        <div class="btn-loader"></div>
-        <p>Loading songs from the server...</p>
-      </div>`;
+    const hasActiveUploads = Array.isArray(state.activeMusicUploads) && state.activeMusicUploads.length > 0;
+    if (!hasActiveUploads) {
+      el.soundsLibrary.innerHTML = `
+        <div class="empty-state">
+          <div class="btn-loader"></div>
+          <p>Loading songs from the server...</p>
+        </div>`;
+    }
     try {
       const res = await KangiService.getSongs();
       state.songs = (res && Array.isArray(res.songs)) ? res.songs : 
@@ -1681,14 +1869,16 @@
   function _renderSongsList() {
     if (!el.soundsLibrary) return;
 
-    let filtered = state.songs;
+    let filtered = state.songs || [];
     if (state.songFilter === 'pending') {
       filtered = state.songs.filter(s => s.isPending === true || s.isPending === "true");
     } else if (state.songFilter === 'approved') {
       filtered = state.songs.filter(s => s.isPending === false || s.isPending === "false" || !s.isPending);
     }
 
-    if (!filtered.length) {
+    const hasActiveUploads = Array.isArray(state.activeMusicUploads) && state.activeMusicUploads.length > 0;
+
+    if (!filtered.length && !hasActiveUploads) {
       el.soundsLibrary.innerHTML = `
         <div class="empty-state">
           <svg viewBox="0 0 20 20" fill="currentColor" style="width:40px;height:40px;opacity:0.4;color:var(--pink);"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
@@ -1698,6 +1888,13 @@
     }
 
     el.soundsLibrary.innerHTML = '';
+
+    // Render active uploads first at the top of the music list
+    if (hasActiveUploads) {
+      state.activeMusicUploads.forEach(job => {
+        el.soundsLibrary.appendChild(_createUploadSongElement(job));
+      });
+    }
     filtered.forEach(song => {
       const isPending = song.isPending === true || song.isPending === "true";
       const songId = song.SongId || song.id;
