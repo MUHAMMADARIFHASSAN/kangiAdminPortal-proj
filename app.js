@@ -1,7 +1,7 @@
 /* ============================================================
    app.js — Kangi NFT QR Manager
    Full flow: Login → Dashboard → Create NFT → Manage QRs → Redeem
-   All data operations go through service.js → PlayFab CloudScript
+   All data operations go through service.js → Supabase REST
    ============================================================ */
 (function () {
   'use strict';
@@ -139,7 +139,7 @@
     modalRevokePremiumBtn: $('modalRevokePremiumBtn'),
     banSectionLabel:    $('banSectionLabel'),
     modalActionAlert:   $('modalActionAlert'),
-    /* Firebase Configuration */
+    /* Settings (Firebase removed — Supabase only) */
     fbDatabaseType:     $('fbDatabaseType'),
     fbCollectionName:   $('fbCollectionName'),
     fbProjectId:        $('fbProjectId'),
@@ -188,7 +188,7 @@
      BOOT
      ================================================================ */
   function boot() {
-    KangiService.init();
+    // KangiService.init(); // removed — Supabase needs no init
     _applyTheme(localStorage.getItem('kangi_theme') || 'dark');
     _bindLogin();
     _bindLogout();
@@ -219,7 +219,7 @@
     // Sessions are not persisted across page loads, so this always comes back null
     // and the login view stays up. The call is kept because it also clears any
     // session written by an older build of the dashboard. See restoreSession() in
-    // service.js for why a reload must not restore a PlayFab ticket.
+    // service.js — no session persistence, admin must re-login.
     const savedSession = KangiService.restoreSession();
     if (savedSession) {
       _onLoginSuccess(savedSession);
@@ -227,7 +227,7 @@
   }
 
   /* ================================================================
-     AUTH — Login with PlayFab Email + Password + isAdmin check
+     AUTH — Login with Supabase Email + Password + isAdmin check
      ================================================================ */
   function _bindLogin() {
     /* Set email type & clear any prefilled values */
@@ -254,14 +254,7 @@
 
       try {
         const res = await KangiService.login(email, password);
-        if (el.firebaseSettingsCard) {
-          el.firebaseSettingsCard.style.display = 'none';
-          try {
-            await KangiService.ensureFirebaseAuth();
-          } catch (e) {
-            console.warn('[Firebase] Auth status:', e);
-          }
-        }
+        // Firebase removed — Supabase session is live
         _onLoginSuccess(res);
       } catch (msg) {
         _alert(el.loginAlert, 'error', msg);
@@ -687,7 +680,7 @@
   }
 
   /* ================================================================
-     DATA — Load from PlayFab via CloudScript
+     DATA — Load from Supabase REST
      ================================================================ */
   async function _loadAllData() {
     try {
@@ -999,7 +992,7 @@
   }
 
   /* ================================================================
-     CREATE NFT — Generate batch → PublishNft CloudScript → PlayFab
+     CREATE NFT — Generate batch → Supabase unlock_codes table
      ================================================================ */
   function _bindFileDrop() {
     if (!el.nftImage) return;
@@ -1088,7 +1081,7 @@
           codes
         };
 
-        /* 3. Save to PlayFab — payload is now tiny (no embedded image) */
+        /* 3. Save to Supabase — payload is now tiny (no embedded image) */
         _alert(el.createAlert, 'info', 'Saving to database…');
         const res = await KangiService.publishNft(nftObj);
 
@@ -1771,7 +1764,7 @@
         trimStart: 0,
         trimEnd: 0,
         isPending: job.isPending,
-        uploaderId: job.admin.playFabId || 'Admin',
+        uploaderId: job.admin.userId || 'Admin',
         uploaderName: job.admin.displayName,
         avatarUrl: job.admin.avatarUrl || ''
       };
@@ -1793,6 +1786,7 @@
 
       // Refresh catalog list so the newly uploaded song appears in the library
       await _loadSongsData();
+      _setSongFilter('all'); // reset to show all songs after upload
 
       if (el.soundsAlert) {
         _alert(el.soundsAlert, 'success', `🎵 "${job.title}" successfully uploaded and added to the library!`);
@@ -1856,8 +1850,10 @@
     }
     try {
       const res = await KangiService.getSongs();
-      state.songs = (res && Array.isArray(res.songs)) ? res.songs : 
+      console.log('[Songs] getSongs response:', res);
+      state.songs = (res && Array.isArray(res.songs)) ? res.songs :
                     ((res && res.songs) ? res.songs : []);
+      console.log('[Songs] state.songs count:', state.songs.length);
     } catch (e) {
       console.error('[Kangi] Songs load error:', e);
       state.songs = [];
@@ -2685,10 +2681,10 @@
   }
 
   /* ================================================================
-     USER LIST — Fetch, Enrich & Render all players from PlayFab
+     USER LIST — Fetch, Enrich & Render all players from Supabase
      ================================================================ */
   /* ================================================================
-     USER LIST — Fetch all players directly from PlayFab via export
+     USER LIST — Fetch all players directly from Supabase
      Two-step flow:
        1. getAllUsers  → starts export, returns { exportId }
        2. getExportResult (polled) → returns { status, users } when complete
@@ -2696,14 +2692,14 @@
   async function _fetchAndEnrichUsers() {
     let result;
     try {
-      result = await KangiService.getFirebaseUsers();
-      console.log('[DWM] getFirebaseUsers response:', result);
+      result = await KangiService.getAllUsers();
+      console.log('[DWM] getAllUsers response:', result);
     } catch (err) {
-      console.warn('[DWM] Firebase user fetch failed, attempting PlayFab live registry fallback:', err);
+      console.warn('[DWM] getAllUsers fetch failed:', err);
       try {
         const pfRes = await KangiService.getAllUsers();
         if (pfRes && pfRes.status === 'complete' && Array.isArray(pfRes.users)) {
-          result = { source: 'playfab-fallback', users: pfRes.users, isFallback: true };
+          result = { source: 'supabase', users: pfRes.users, isFallback: false };
         } else {
           throw err;
         }
@@ -2714,6 +2710,17 @@
     }
 
     const users = (result && Array.isArray(result.users)) ? result.users : [];
+
+    // Normalize Supabase snake_case fields → camelCase so all display logic works
+    users.forEach(u => {
+      if (u.display_name  !== undefined && !u.displayName)  u.displayName  = u.display_name;
+      if (u.avatar_url    !== undefined && !u.avatarUrl)    u.avatarUrl    = u.avatar_url;
+      if (u.is_admin      !== undefined && u.isAdmin      === undefined) u.isAdmin      = u.is_admin;
+      if (u.is_banned     !== undefined && u.isBanned     === undefined) u.isBanned     = u.is_banned;
+      if (u.is_premium    !== undefined && u.isPremium    === undefined) u.isPremium    = u.is_premium;
+      if (u.banned_until  !== undefined && !u.bannedUntil) u.bannedUntil  = u.banned_until;
+      if (u.created_at    !== undefined && !u.created)     u.created      = u.created_at;
+    });
 
     // Sort by name alphabetically
     users.sort((a, b) => {
@@ -2735,7 +2742,7 @@
       csVerEl.className   = 'badge badge-success';
     }
     if (fbStatusEl) {
-      if (result.source === 'firebase') {
+      if (true) {
         fbStatusEl.textContent = `● Connected (dance-withmii · ${result.collection || 'users'})`;
         fbStatusEl.className   = 'badge badge-success';
       } else {
@@ -2744,8 +2751,8 @@
       }
     }
     if (dsEl) {
-      if (result.source === 'firebase') {
-        dsEl.textContent = `Firebase (${result.collection || 'users'}) — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+      if (true) {
+        dsEl.textContent = `Supabase (profiles) — ${users.length} player${users.length !== 1 ? 's' : ''}`;
       } else {
         dsEl.textContent = `Database Live Registry — ${users.length} player${users.length !== 1 ? 's' : ''}`;
       }
@@ -2760,7 +2767,7 @@
     el.usersList.innerHTML = `
       <div class="empty-state">
         <div class="btn-loader" style="width:22px;height:22px;border-width:3px;"></div>
-        <p id="_usersLoadMsg">Fetching player list from Firebase…</p>
+        <p id="_usersLoadMsg">Fetching player list from Supabase…</p>
       </div>`;
 
     try {
@@ -2781,15 +2788,15 @@
 
   function _getUserDisplayName(user) {
     if (!user) return 'Unknown';
-    let name = (user.displayName || '').trim();
-    // If displayName is raw hex PlayFabId, 'Unknown', or empty:
-    if (!name || name.toLowerCase() === 'unknown' || name === user.playFabId) {
+    // Supabase returns snake_case (display_name), normalize both
+    let name = (user.display_name || user.displayName || '').trim();
+    if (!name || name.toLowerCase() === 'unknown' || name === user.id) {
       if (user.username) {
         name = user.username;
       } else if (user.email) {
         name = user.email.split('@')[0];
-      } else if (user.playFabId) {
-        name = 'Player ' + user.playFabId.slice(-4);
+      } else if (user.id) {
+        name = 'Player ' + user.id.slice(-4);
       } else {
         name = 'Player';
       }
@@ -2800,7 +2807,7 @@
   function _createUserCardElement(user) {
     const card = document.createElement('div');
     card.className = 'user-card';
-    card.dataset.playfabid = user.playFabId;
+    card.dataset.userid = user.id;
     card.dataset.user = JSON.stringify(user);
 
     const friendlyName   = _getUserDisplayName(user);
@@ -2830,7 +2837,7 @@
           </span>
           <span>
             <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
-            ${_esc(user.playFabId || 'No ID')}
+            ${_esc(user.id || 'No ID')}
           </span>
           ${user.lastLogin ? `<span>
             <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
@@ -2920,13 +2927,10 @@
     }
 
     const filtered = state.allUsers.filter(user => {
-      const displayName = (user.displayName || '').toLowerCase();
-      const email = (user.email || '').toLowerCase();
-      const playFabId = (user.playFabId || '').toLowerCase();
-      
-      return displayName.includes(query) || 
-             email.includes(query) || 
-             playFabId.includes(query);
+      const displayName = (user.display_name || user.displayName || '').toLowerCase();
+      const email       = (user.email || '').toLowerCase();
+      const userId      = (user.id || '').toLowerCase();
+      return displayName.includes(query) || email.includes(query) || userId.includes(query);
     });
 
     state.filteredUsers = filtered;
@@ -2958,7 +2962,7 @@
     /* ── Make Admin ── */
     el.modalMakeAdminBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       if (!confirm(`Grant admin access to "${displayName || email}"?`)) return;
       await _modalAction(async () => {
         const res = await KangiService.makeAdmin(email, playFabId);
@@ -2976,7 +2980,7 @@
     /* ── Revoke Admin ── */
     el.modalRevokeAdminBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       if (!confirm(`Revoke admin from "${displayName || email}"?`)) return;
       await _modalAction(async () => {
         const res = await KangiService.revokeAdmin(email, playFabId);
@@ -2994,9 +2998,9 @@
     /* ── Show Logs (User In-Game Debug Console) ── */
     el.modalShowLogsBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       await _modalAction(async () => {
-        const res = await KangiService.setUserShowLogs(email, playFabId, true);
+        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
         if (res && res.success) {
           state.selectedUser.showLogs = true;
           _modalAlert('success', `✓ In-game console logs ENABLED for ${displayName || email}.`);
@@ -3011,9 +3015,9 @@
     /* ── Hide Logs (User In-Game Debug Console) ── */
     el.modalHideLogsBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       await _modalAction(async () => {
-        const res = await KangiService.setUserShowLogs(email, playFabId, false);
+        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
         if (res && res.success) {
           state.selectedUser.showLogs = false;
           _modalAlert('success', `✓ In-game console logs HIDDEN for ${displayName || email}.`);
@@ -3028,7 +3032,7 @@
     /* ── Make Premium ── */
     el.modalMakePremiumBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       if (!confirm(`Give "${displayName || email}" premium access to upload music?`)) return;
       await _modalAction(async () => {
         const res = await KangiService.makePremium(email, playFabId);
@@ -3046,7 +3050,7 @@
     /* ── Revoke Premium ── */
     el.modalRevokePremiumBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       if (!confirm(`Remove premium music upload access from "${displayName || email}"?`)) return;
       await _modalAction(async () => {
         const res = await KangiService.revokePremium(email, playFabId);
@@ -3064,7 +3068,7 @@
     /* ── Unban ── */
     el.modalUnbanBtn?.addEventListener('click', async () => {
       if (!state.selectedUser) return;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       if (!confirm(`Lift ban on "${displayName || email}"?`)) return;
       await _modalAction(async () => {
         const res = await KangiService.unbanUser(email, playFabId);
@@ -3072,7 +3076,7 @@
           state.selectedUser.isBanned = false;
           state.selectedUser.bannedUntil = '';
           state.selectedUser.banReason = '';
-          const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === playFabId) || (u.id && u.id === state.selectedUser.id));
+          const idx = (state.allUsers || []).findIndex(u => (u.id && u.id === playFabId) || (u.id && u.id === state.selectedUser.id));
           if (idx !== -1) {
             state.allUsers[idx] = { ...state.allUsers[idx], isBanned: false, bannedUntil: '', banReason: '' };
           }
@@ -3092,7 +3096,7 @@
       if (!card || !state.selectedUser) return;
 
       const duration = card.dataset.modalBan;
-      const { email, playFabId, displayName } = state.selectedUser;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       const label = duration === 'permanent' ? 'permanently' : `for ${duration} days`;
       if (!confirm(`Ban "${displayName || email}" ${label}?`)) return;
 
@@ -3103,7 +3107,7 @@
           state.selectedUser.isBanned = true;
           state.selectedUser.isAdmin  = false;
           state.selectedUser.bannedUntil = res.bannedUntil || '';
-          const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === playFabId) || (u.id && u.id === state.selectedUser.id));
+          const idx = (state.allUsers || []).findIndex(u => (u.id && u.id === playFabId) || (u.id && u.id === state.selectedUser.id));
           if (idx !== -1) {
             state.allUsers[idx] = { ...state.allUsers[idx], isBanned: true, isAdmin: false, bannedUntil: res.bannedUntil || '' };
           }
@@ -3125,7 +3129,7 @@
 
       await _modalAction(async () => {
         const res = await KangiService.sendNotification(
-          state.selectedUser.playFabId,
+          state.selectedUser.id,
           'Message from Admin',
           msg,
           'info',
@@ -3171,29 +3175,29 @@
   function _updateModalButtons(user) {
     if (!el.userModalActionsBar) return;
 
-    // Admin buttons
-    el.modalMakeAdminBtn.style.display   = (!user.isAdmin && !user.isBanned && user.email) ? '' : 'none';
-    el.modalRevokeAdminBtn.style.display = (user.isAdmin  && user.email) ? '' : 'none';
+    // Admin buttons — use id as fallback when email missing
+    el.modalMakeAdminBtn.style.display   = (!user.isAdmin  && !user.isBanned) ? '' : 'none';
+    el.modalRevokeAdminBtn.style.display = (user.isAdmin) ? '' : 'none';
 
     // Show / Hide Logs buttons
     if (el.modalShowLogsBtn) {
-      el.modalShowLogsBtn.style.display = (!user.showLogs && !user.isBanned && user.email) ? '' : 'none';
+      el.modalShowLogsBtn.style.display = (!user.showLogs && !user.isBanned) ? '' : 'none';
     }
     if (el.modalHideLogsBtn) {
-      el.modalHideLogsBtn.style.display = (user.showLogs && user.email) ? '' : 'none';
+      el.modalHideLogsBtn.style.display = (user.showLogs) ? '' : 'none';
     }
 
-    // Premium toggles — a banned user cannot be granted upload access
+    // Premium toggles
     if (el.modalMakePremiumBtn) {
-      el.modalMakePremiumBtn.style.display   = (!user.isPremium && !user.isBanned && user.email) ? '' : 'none';
+      el.modalMakePremiumBtn.style.display   = (!user.isPremium && !user.isBanned) ? '' : 'none';
     }
     if (el.modalRevokePremiumBtn) {
-      el.modalRevokePremiumBtn.style.display = (user.isPremium && user.email) ? '' : 'none';
+      el.modalRevokePremiumBtn.style.display = (user.isPremium) ? '' : 'none';
     }
 
     // Ban / unban
-    const canBan   = !user.isBanned && user.email;
-    const canUnban = user.isBanned  && user.email;
+    const canBan   = !user.isBanned;
+    const canUnban =  user.isBanned;
 
     // Show/hide the whole ban grid
     const banGrid = el.userModalActionsBar.querySelector('.upf-ban-grid');
@@ -3221,11 +3225,11 @@
     const friendlyName  = _getUserDisplayName(user);
     const initial       = friendlyName.charAt(0).toUpperCase();
 
-    // Call PlayFab API on-demand to fetch internal data (unlocked characters, notifications, etc.)
+    // Fetch on-demand internal data from Supabase
     let pfDetails = { unlockedCharacters: user.unlockedCharacters || [], notifications: [] };
     try {
-      if (user.playFabId) {
-        pfDetails = await KangiService.getPlayFabUserDetails(user.playFabId);
+      if (user.id) {
+        pfDetails = await KangiService.getUserCharacters(user.id).then(r => ({ characters: r.unlockedCharacters || [], notifications: [] }));
         user.unlockedCharacters = pfDetails.unlockedCharacters || [];
         if (pfDetails.isAdmin !== undefined)   user.isAdmin   = pfDetails.isAdmin;
         if (pfDetails.showLogs !== undefined)  user.showLogs  = pfDetails.showLogs;
@@ -3235,20 +3239,20 @@
         if (pfDetails.banReason !== undefined)   user.banReason   = pfDetails.banReason;
 
         // Keep local user memory synchronized
-        const idx = (state.allUsers || []).findIndex(u => (u.playFabId && u.playFabId === user.playFabId) || (u.id && u.id === user.id));
+        const idx = (state.allUsers || []).findIndex(u => (u.id && u.id === user.id) || (u.id && u.id === user.id));
         if (idx !== -1) {
           state.allUsers[idx] = { ...state.allUsers[idx], ...user };
         }
       }
     } catch (pfErr) {
-      console.warn('[DWM] PlayFab internal fetch notice:', pfErr);
+      console.warn('[DWM] Supabase internal fetch notice:', pfErr);
     }
 
     const rawIds        = user.unlockedCharacters || [];
     const unlockedNames = rawIds.length > 0 ? _resolveCharacterNames(rawIds) : [];
     const allCharacters = ['Katsumi', 'Kiko', 'Bee', 'Chyna'];
 
-    console.log('[Kangi] PlayFab on-demand details for:', friendlyName, '| rawIds:', rawIds, '| resolved:', unlockedNames);
+    console.log('[Kangi] Supabase on-demand details for:', friendlyName, '| rawIds:', rawIds, '| resolved:', unlockedNames);
 
     el.userDetailsBody.innerHTML = `
       <!-- Hero -->
@@ -3260,9 +3264,10 @@
           <h3>${_esc(friendlyName)}</h3>
           <span class="up-hero-email">${_esc(user.email || 'No email')}</span>
           <div class="up-hero-badges">
-            ${user.isAdmin  ? '<span class="chip chip--purple">Admin</span>'  : ''}
-            ${user.showLogs ? '<span class="chip chip--teal">Logs: ON</span>' : ''}
-            ${user.isBanned ? '<span class="chip chip--red">Banned</span>'    : '<span class="chip chip--green">Active</span>'}
+            ${user.isAdmin   ? '<span class="chip chip--purple">Admin</span>'   : ''}
+            ${user.isPremium ? '<span class="chip chip--teal">Premium</span>'   : ''}
+            ${user.showLogs  ? '<span class="chip chip--teal">Logs: ON</span>'  : ''}
+            ${user.isBanned  ? '<span class="chip chip--red">Banned</span>'     : '<span class="chip chip--green">Active</span>'}
             ${user.isBanned && user.bannedUntil ? `<span class="chip chip--orange" style="font-size:0.65rem;">Until: ${new Date(user.bannedUntil).toLocaleDateString()}</span>` : ''}
             <span class="chip chip--teal" style="font-size:0.65rem;">Database Connected</span>
           </div>
@@ -3271,10 +3276,10 @@
 
       <!-- Account info -->
       <div class="up-section">
-        <div class="up-section-title">Account Information (Database &amp; Firebase)</div>
+        <div class="up-section-title">Account Information (Supabase)</div>
         <div class="up-info-grid">
           <div class="up-info-item">
-            <span class="up-info-label">Player Name</span>
+            <span class="up-info-label">Username</span>
             <span class="up-info-value">${_esc(friendlyName)}</span>
           </div>
           <div class="up-info-item">
@@ -3282,27 +3287,55 @@
             <span class="up-info-value">${_esc(user.email || '—')}</span>
           </div>
           <div class="up-info-item">
-            <span class="up-info-label">PlayFab ID</span>
-            <span class="up-info-value">${_esc(user.playFabId || '—')}</span>
+            <span class="up-info-label">User ID</span>
+            <span class="up-info-value" style="font-size:0.72rem;word-break:break-all;">${_esc(user.id || '—')}</span>
           </div>
           <div class="up-info-item">
             <span class="up-info-label">Account Status</span>
             <span class="up-info-value">${user.isBanned ? '🔴 Banned' + (user.bannedUntil ? ` (Until ${new Date(user.bannedUntil).toLocaleDateString()})` : ' (Permanent)') : '🟢 Active'}</span>
           </div>
           <div class="up-info-item">
-            <span class="up-info-label">Joined</span>
-            <span class="up-info-value">${user.created ? new Date(user.created).toLocaleDateString() : '—'}</span>
+            <span class="up-info-label">Role</span>
+            <span class="up-info-value">${user.isAdmin ? '🛡️ Admin' : user.isPremium ? '⭐ Premium' : '👤 Regular'}</span>
           </div>
           <div class="up-info-item">
-            <span class="up-info-label">Last Login</span>
-            <span class="up-info-value">${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</span>
+            <span class="up-info-label">Joined</span>
+            <span class="up-info-value">${user.created ? new Date(user.created).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : '—'}</span>
           </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="up-section">
+        <div class="up-section-title">Quick Actions</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">
+          ${!user.isAdmin ? `
+            <button class="btn btn-sm btn-primary" onclick="document.getElementById('modalMakeAdminBtn')?.click()" style="font-size:0.78rem;">
+              🛡️ Make Admin
+            </button>` : `
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('modalRevokeAdminBtn')?.click()" style="font-size:0.78rem;">
+              ❌ Revoke Admin
+            </button>`}
+          ${!user.isPremium && !user.isBanned ? `
+            <button class="btn btn-sm btn-primary" onclick="document.getElementById('modalMakePremiumBtn')?.click()" style="font-size:0.78rem;background:linear-gradient(135deg,#f59e0b,#d97706);">
+              ⭐ Make Premium
+            </button>` : user.isPremium ? `
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('modalRevokePremiumBtn')?.click()" style="font-size:0.78rem;">
+              ⭐ Revoke Premium
+            </button>` : ''}
+          ${!user.isBanned ? `
+            <button class="btn btn-sm btn-danger" data-modal-ban="1h" style="font-size:0.78rem;">
+              🚫 Ban User
+            </button>` : `
+            <button class="btn btn-sm btn-primary" onclick="document.getElementById('modalUnbanBtn')?.click()" style="font-size:0.78rem;background:#10b981;">
+              ✅ Unban
+            </button>`}
         </div>
       </div>
 
       <!-- Characters -->
       <div class="up-section">
-        <div class="up-section-title">Unlocked Characters via PlayFab (${rawIds.length} / ${allCharacters.length})</div>
+        <div class="up-section-title">Unlocked Characters (${rawIds.length} / ${allCharacters.length})</div>
         <div class="up-chars-grid">
           ${allCharacters.map(char => {
             const isUnlocked = unlockedNames.some(n =>
@@ -3339,8 +3372,8 @@
     }
 
     /* Load and render the notification list */
-    if (user.playFabId) {
-      _loadUserNotifications(user.playFabId, pfDetails.notifications);
+    if (user.id) {
+      _loadUserNotifications(user.id, pfDetails.notifications);
     }
   }
 
@@ -3514,8 +3547,8 @@
       card.innerHTML = `
         <div class="msg-card-header">
           <div class="msg-card-meta">
-            <span class="msg-from">${_esc(msg.displayName || msg.playFabId)}</span>
-            <span class="msg-id">${_esc(msg.playFabId)}</span>
+            <span class="msg-from">${_esc(msg.displayName || msg.user_id)}</span>
+            <span class="msg-id">${_esc(msg.user_id || '')}</span>
           </div>
           <div style="display:flex;align-items:center;gap:0.6rem;">
             <span class="chip ${isOpen ? 'chip--red' : 'chip--green'}">${isOpen ? 'Open' : 'Replied'}</span>

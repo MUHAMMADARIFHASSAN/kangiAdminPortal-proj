@@ -1,563 +1,664 @@
 /* ============================================================
-   service.js — Data & Auth Service Layer
-   Mirrors the C# LoginManager + AdminManager flow in JS.
-   Title ID: 182E5E (hardcoded, never exposed in UI)
+   service.js -- Supabase Data & Auth Service Layer
+   Project: https://hjmqwvcivejmtuwofras.supabase.co
    ============================================================ */
 
 const KangiService = (function () {
 
-  /* ── Config ── */
-  const TITLE_ID     = '182E5E';
-  const NFT_DATA_KEY = 'GlobalAppNftsMasterList';
+  /* -- Supabase Config -- */
+  const SUPABASE_URL  = 'https://hjmqwvcivejmtuwofras.supabase.co';
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhqbXF3dmNpdmVqbXR1d29mcmFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5MTQxMTIsImV4cCI6MjExMDQ5MDExMn0.z3iRrAHGT3d-psIwMrEAMVIXqXV4pKYV_gYi0ZNqRBY';
 
-  /* ── Session State ── */
+  /* -- Session State -- */
   const session = {
-    playFabId:   null,
-    email:       null,
-    displayName: null,
-    avatarUrl:   null,
-    isAdmin:     false,
-    isLoggedIn:  () => !!session.playFabId
+    userId:       null,
+    email:        null,
+    displayName:  null,
+    avatarUrl:    null,
+    isAdmin:      false,
+    accessToken:  null,
+    refreshToken: null,
+    isLoggedIn:   function() { return !!session.accessToken; }
   };
 
-  /* ── Boot: set title ── */
-  function init() {
-    PlayFab.settings.titleId = TITLE_ID;
+  /* -- HTTP helpers -- */
+  function _headers(extra) {
+    var h = {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON
+    };
+    if (session.accessToken) h['Authorization'] = 'Bearer ' + session.accessToken;
+    if (extra) Object.assign(h, extra);
+    return h;
+  }
+
+  async function _post(path, body, auth) {
+    var headers = { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON };
+    if (auth && session.accessToken) headers['Authorization'] = 'Bearer ' + session.accessToken;
+    var res = await fetch(SUPABASE_URL + path, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+    var json = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(json.message || json.error_description || json.msg || ('HTTP ' + res.status));
+    return json;
+  }
+
+  async function _get(path, params) {
+    params = params || {};
+    var url = new URL(SUPABASE_URL + '/rest/v1' + path);
+    Object.entries(params).forEach(function(kv) { url.searchParams.set(kv[0], kv[1]); });
+    var res = await fetch(url.toString(), { headers: _headers() });
+    var json = await res.json().catch(function() { return []; });
+    if (!res.ok) throw new Error((json && json.message) || ('HTTP ' + res.status));
+    return json;
+  }
+
+  async function _patch(path, body) {
+    var res = await fetch(SUPABASE_URL + '/rest/v1' + path, {
+      method: 'PATCH',
+      headers: Object.assign({}, _headers(), { 'Prefer': 'return=representation' }),
+      body: JSON.stringify(body)
+    });
+    var json = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error((json && json.message) || ('HTTP ' + res.status));
+    return json;
+  }
+
+  async function _delete(path) {
+    var res = await fetch(SUPABASE_URL + '/rest/v1' + path, {
+      method: 'DELETE',
+      headers: _headers()
+    });
+    if (!res.ok) {
+      var json = await res.json().catch(function() { return {}; });
+      throw new Error((json && json.message) || ('HTTP ' + res.status));
+    }
+    return true;
+  }
+
+  async function _rpc(fn, body) {
+    body = body || {};
+    var res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: _headers(),
+      body: JSON.stringify(body)
+    });
+    var json = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error((json && (json.message || json.hint)) || ('HTTP ' + res.status));
+    return json;
   }
 
   /* ============================================================
-     AUTH — Login with Email + Password   (mirrors LoginManager.cs)
-     1. LoginWithEmailAddress
-     2. GetUserData → check IsAdmin key
-     3. Resolve with { success, isAdmin, displayName } or reject
+     AUTH
      ============================================================ */
-  function login(email, password) {
-    return new Promise((resolve, reject) => {
-      /* Profile fields come back only when the title enables them under
-         Game Manager > Client Profile Options. Asking for one that is switched
-         off does not quietly omit it — it fails the entire login with
-         RequestViewConstraintParamsNotAllowed (1303). That is what blocked every
-         sign-in here: the request asked for ShowAvatarUrl while the title had
-         "Show Avatar Url" turned off.
+  async function login(email, password) {
+    var data = await _post('/auth/v1/token?grant_type=password', {
+      email: email.trim(),
+      password: password
+    });
 
-         The profile is now requested best-effort, and any view-constraint
-         rejection retries once with no InfoRequestParameters at all. Little is
-         lost, because loadAdminIdentity() reads the name and picture from
-         UserData — the same source the game itself reads. */
-      const _attempt = (infoParams) => {
-        const req = {
-          TitleId:  TITLE_ID,
-          Email:    email.trim(),
-          Password: password
-        };
-        if (infoParams) req.InfoRequestParameters = infoParams;
+    session.accessToken  = data.access_token;
+    session.refreshToken = data.refresh_token;
+    session.userId       = data.user && data.user.id;
+    session.email        = email.trim();
 
-        PlayFabClientSDK.LoginWithEmailAddress(req, (result, error) => {
-          if (error) {
-            if (infoParams && _isViewConstraintError(error)) {
-              console.warn('[Kangi] Title rejected the requested profile fields; retrying sign-in without them.');
-              _attempt(null);
-              return;
-            }
-            reject(_friendlyError(error));
-            return;
-          }
-          _onAuthenticated(result, email, resolve, reject);
+    var rows = await _get('/profiles', {
+      'id':     'eq.' + session.userId,
+      'select': 'display_name,avatar_url,is_admin,is_banned'
+    });
+    var profile = (rows && rows[0]) || {};
+
+    if (!profile.is_admin) {
+      await logout();
+      throw new Error('Access denied. This account does not have administrator privileges.');
+    }
+
+    session.displayName = profile.display_name || email.split('@')[0];
+    session.avatarUrl   = profile.avatar_url   || '';
+    session.isAdmin     = true;
+
+    return {
+      success:     true,
+      isAdmin:     true,
+      userId:      session.userId,
+      displayName: session.displayName,
+      avatarUrl:   session.avatarUrl,
+      email:       session.email
+    };
+  }
+
+  async function logout() {
+    try {
+      if (session.accessToken) {
+        await fetch(SUPABASE_URL + '/auth/v1/logout', {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + session.accessToken }
         });
-      };
-
-      _attempt({
-        GetPlayerProfile:   true,
-        ProfileConstraints: { ShowDisplayName: true }
-      });
-    });
+      }
+    } catch(e) {}
+    session.userId = session.email = session.displayName = session.avatarUrl = null;
+    session.accessToken = session.refreshToken = null;
+    session.isAdmin = false;
   }
 
-  /* 1303 means the title disallows one of the requested profile fields. Matched
-     on the code as well as the name so it survives a change of wording. */
-  function _isViewConstraintError(error) {
-    return error?.errorCode === 1303 ||
-           error?.error === 'RequestViewConstraintParamsNotAllowed';
+  async function sendAccountRecoveryEmail(email) {
+    if (!email || !email.trim()) throw new Error('Please enter your email address.');
+    await _post('/auth/v1/recover', { email: email.trim() });
+    return { success: true, message: 'Password reset link sent! Please check your inbox.' };
   }
 
-  /* Shared post-login path: store the session, confirm admin rights, resolve. */
-  function _onAuthenticated(result, email, resolve, reject) {
-    /* Store session basics */
-    session.playFabId   = result.data.PlayFabId;
-    session.email       = email.trim();
-    session.displayName = result.data.InfoResultPayload?.PlayerProfile?.DisplayName || '';
-    session.avatarUrl   = result.data.InfoResultPayload?.PlayerProfile?.AvatarUrl   || '';
-    const ticket        = result.data.SessionTicket;
+  function restoreSession() { return null; }
 
-    /* Admin check — mirrors AdminManager.CheckAdminStatus() */
-    _checkAdminStatus()
-      .then(isAdmin => {
-        if (!isAdmin) {
-          /* Not an admin — clear session, deny access */
-          _clearSession();
-          reject('Access denied. This account does not have administrator privileges.');
-        } else {
-          // Resolve the name and picture before the login resolves. The session is
-          // no longer persisted, so this is not about surviving a reload - it is
-          // what fills session.displayName / avatarUrl, which getAdminIdentity()
-          // stamps onto every song this admin uploads.
-          loadAdminIdentity().then(() => {
-            _saveSessionToStorage(ticket);
-            resolve({
-              success:     true,
-              isAdmin:     true,
-              playFabId:   session.playFabId,
-              displayName: session.displayName,
-              avatarUrl:   session.avatarUrl,
-              email:       session.email
-            });
-          });
-        }
-      })
-      .catch(() => {
-        _clearSession();
-        reject('Could not verify account permissions. Please try again.');
-      });
-  }
-
-  /* ============================================================
-     ADMIN IDENTITY — name + profile picture
-
-     Read from the same place the game reads a player's identity, or the
-     dashboard would stamp a different picture onto a song than the one the app
-     shows for that same account.
-
-     UploaderProfileDirectory.cs in Unity looks in PlayFab **UserData** first —
-     keys "AvatarUrl"/"avatarUrl" and "DisplayName"/"UserName", written with
-     Public permission — and only falls back to the PlayerProfile. This mirrors
-     that order exactly.
-
-     Never rejects: a missing picture is not a reason to block an upload, it
-     just means the song carries no avatar and the app falls back to its own
-     profile lookup.
-     ============================================================ */
-  function loadAdminIdentity() {
-    return new Promise(resolve => {
-      if (!session.playFabId) { resolve(session); return; }
-
-      PlayFabClientSDK.GetUserData(
-        { Keys: ['AvatarUrl', 'avatarUrl', 'DisplayName', 'displayName', 'UserName', 'username'] },
-        (result, error) => {
-          if (!error) {
-            const d = result?.data?.Data || {};
-            const pick = (...keys) => {
-              for (const k of keys) {
-                const v = d[k]?.Value;
-                if (v && String(v).trim()) return String(v).trim();
-              }
-              return '';
-            };
-
-            const avatar = pick('AvatarUrl', 'avatarUrl');
-            const name   = pick('DisplayName', 'displayName', 'UserName', 'username');
-
-            if (avatar) session.avatarUrl   = avatar;
-            if (name)   session.displayName = name;
-          }
-
-          // Last resort for the name only: the local part of the sign-in email.
-          // Never invented for the picture — a wrong avatar is worse than none.
-          if (!session.displayName && session.email) {
-            session.displayName = session.email.split('@')[0];
-          }
-          resolve(session);
-        }
-      );
-    });
-  }
-
-  /* Who the dashboard is acting as. Used to stamp uploads with a real identity
-     instead of the old hardcoded "Dashboard Admin". */
   function getAdminIdentity() {
     return {
-      playFabId:   session.playFabId || '',
+      userId:      session.userId      || '',
       displayName: session.displayName || (session.email ? session.email.split('@')[0] : '') || 'Dashboard Admin',
-      avatarUrl:   session.avatarUrl || '',
-      email:       session.email || ''
+      avatarUrl:   session.avatarUrl   || '',
+      email:       session.email       || ''
     };
   }
 
-  /* ── Admin Status Check  (mirrors AdminManager.cs → GetUserData IsAdmin) ── */
-  function _checkAdminStatus() {
-    return new Promise((resolve) => {
-      PlayFabClientSDK.GetUserData(
-        { Keys: ['IsAdmin'] },
-        (result, error) => {
-          if (error || !result?.data?.Data) {
-            session.isAdmin = false;
-            resolve(false);
-            return;
-          }
-          const val = result.data.Data?.IsAdmin?.Value ?? '';
-          const isAdmin = val.toLowerCase() === 'true';
-          session.isAdmin = isAdmin;
-          resolve(isAdmin);
-        }
-      );
+  /* ============================================================
+     SONGS
+     ============================================================ */
+  function _rowToSongData(row) {
+    return {
+      SongId:       row.id,
+      songTitle:    row.title,
+      Singer:       row.artist,
+      SongUrl:      row.url,
+      songLink:     row.url,
+      coverImageUrl:row.cover_url,
+      uploadDate:   row.created_at,
+      isPending:    row.status === 'pending',
+      uploaderName: row.uploader_name,
+      avatarUrl:    row.avatar_url,
+      modes:        row.modes || [],
+      trimStart:    row.trim_start || 0,
+      trimEnd:      row.trim_end   || 0
+    };
+  }
+
+  async function getSongs() {
+    var results = await Promise.all([
+      _get('/songs', { 'status': 'eq.approved', 'order': 'created_at.desc', 'select': '*' }),
+      _get('/songs', { 'status': 'eq.pending',  'order': 'created_at.desc', 'select': '*' })
+    ]);
+    var approved = results[0] || [];
+    var pending  = results[1] || [];
+
+    var approvedSongs = approved.map(_rowToSongData);
+    var pendingSongs  = pending.map(_rowToSongData);
+    var songs = pendingSongs.concat(approvedSongs);
+
+    return {
+      success:      true,
+      songs:        songs,
+      approvedSongs:approvedSongs,
+      pendingSongs: pendingSongs
+    };
+  }
+
+  async function approveSong(songId) {
+    await _patch('/songs?id=eq.' + songId, { status: 'approved' });
+    return { success: true };
+  }
+
+  async function deleteSong(songId) {
+    await _delete('/songs?id=eq.' + songId);
+    return { success: true };
+  }
+
+  async function updateSongSettings(songId, modes, tsStart, tsEnd) {
+    await _patch('/songs?id=eq.' + songId, {
+      modes:      Array.isArray(modes) ? modes : [],
+      trim_start: Number(tsStart) || 0,
+      trim_end:   Number(tsEnd)   || 0
     });
+    return { success: true };
   }
 
-  /* ── Logout ── */
-  function logout() {
-    PlayFabClientSDK.ForgetAllCredentials();
-    _clearSession();
+  async function addSong(songData, autoApprove) {
+    if (autoApprove === undefined) autoApprove = true;
+    var identity = getAdminIdentity();
+    var payload = {
+      title:         songData.songTitle || songData.title || '',
+      artist:        songData.Singer    || songData.artist || '',
+      url:           songData.SongUrl   || songData.url   || '',
+      cover_url:     songData.coverImageUrl || songData.cover_url || '',
+      status:        autoApprove ? 'approved' : 'pending',
+      submitted_by:  session.userId,
+      uploader_name: identity.displayName,
+      avatar_url:    identity.avatarUrl,
+      modes:         Array.isArray(songData.modes) ? songData.modes : [],
+      trim_start:    Number(songData.trimStart) || 0,
+      trim_end:      Number(songData.trimEnd)   || 0
+    };
+    var res = await fetch(SUPABASE_URL + '/rest/v1/songs', {
+      method: 'POST',
+      headers: Object.assign({}, _headers(), { 'Prefer': 'return=representation' }),
+      body: JSON.stringify(payload)
+    });
+    var json = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error((json && json.message) || ('HTTP ' + res.status));
+    return { success: true, approved: autoApprove };
   }
 
-  /* ── Send Account Recovery / Password Reset Email ── */
-  function sendAccountRecoveryEmail(email) {
-    return new Promise((resolve, reject) => {
-      if (!email || !email.trim()) {
-        reject('Please enter your email address.');
+  /* ============================================================
+     USER MANAGEMENT
+     ============================================================ */
+  async function getAllUsers() {
+    try {
+      var rows = await _get('/admin_users', {
+        'select': 'id,email,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at,last_sign_in_at',
+        'order':  'created_at.desc'
+      });
+      return { success: true, users: rows || [] };
+    } catch(e) {
+      var rows2 = await _get('/profiles', {
+        'select': 'id,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at',
+        'order':  'created_at.desc'
+      });
+      return { success: true, users: rows2 || [] };
+    }
+  }
+
+  async function getUserDataFlags(userId) {
+    var rows = await _get('/profiles', {
+      'id':     'eq.' + userId,
+      'select': 'is_admin,is_banned,is_premium,banned_until'
+    });
+    if (!rows || rows.length === 0) return { success: false, error: 'User not found.' };
+    return Object.assign({ success: true }, rows[0]);
+  }
+
+  async function makeAdmin(email, userId) {
+    if (!userId) throw new Error('User ID required.');
+    await _rpc('set_admin_status', { target_user: userId, new_is_admin: true });
+    return { success: true };
+  }
+
+  async function revokeAdmin(email, userId) {
+    if (!userId) throw new Error('User ID required.');
+    await _rpc('set_admin_status', { target_user: userId, new_is_admin: false });
+    return { success: true };
+  }
+
+  async function makePremium(email, userId) {
+    if (!userId) throw new Error('User ID required.');
+    await _rpc('set_premium_status', { target_user: userId, new_is_premium: true });
+    return { success: true };
+  }
+
+  async function revokePremium(email, userId) {
+    if (!userId) throw new Error('User ID required.');
+    await _rpc('set_premium_status', { target_user: userId, new_is_premium: false });
+    return { success: true };
+  }
+
+  async function banUser(email, userId, durationDays) {
+    if (!userId) throw new Error('User ID required.');
+    durationDays = durationDays || 0;
+    var expiry = durationDays > 0
+      ? new Date(Date.now() + durationDays * 86400000).toISOString()
+      : null;
+    await _rpc('ban_user', { target_user: userId, reason: 'Banned by admin.', expiry: expiry });
+    return { success: true };
+  }
+
+  async function unbanUser(email, userId) {
+    if (!userId) throw new Error('User ID required.');
+    await _rpc('unban_user', { target_user: userId });
+    return { success: true };
+  }
+
+  async function getUserCharacters(userId) {
+    var rows = await _get('/unlocked_characters', {
+      'user_id': 'eq.' + userId,
+      'select':  'character_id'
+    });
+    return { unlockedCharacters: (rows || []).map(function(r) { return r.character_id; }) };
+  }
+
+  /* ============================================================
+     VIDEOS
+     ============================================================ */
+  async function getVideos() {
+    var rows = await _get('/videos', { 'select': '*', 'order': 'created_at.desc' });
+    return { success: true, videos: rows || [] };
+  }
+
+  async function deleteVideo(videoId) {
+    await _delete('/videos?id=eq.' + videoId);
+    return { success: true };
+  }
+
+  /* ============================================================
+     NOTIFICATIONS
+     ============================================================ */
+  async function getNotifications(targetUserId) {
+    var rows = await _get('/notifications', {
+      'user_id': 'eq.' + targetUserId,
+      'order':   'created_at.desc',
+      'select':  '*'
+    });
+    return { success: true, notifications: rows || [] };
+  }
+
+  async function sendNotification(targetUserId, title, message, type) {
+    type = type || 'info';
+    if (!targetUserId) return { success: false, error: 'No user ID provided.' };
+    await _rpc('send_notification', {
+      target_user: targetUserId,
+      notif_title: title,
+      notif_body:  message,
+      notif_type:  type
+    });
+    return { success: true };
+  }
+
+  async function broadcastNotification(title, message, type) {
+    type = type || 'general';
+    await _rpc('send_notification', {
+      target_user: null,
+      notif_title: title,
+      notif_body:  message,
+      notif_type:  type
+    });
+    return { success: true };
+  }
+
+  /* ============================================================
+     SUPPORT MESSAGES
+     ============================================================ */
+  async function getSupportMessages() {
+    var rows = await _get('/support_messages', {
+      'order':  'created_at.desc',
+      'select': '*'
+    });
+    return { success: true, messages: rows || [] };
+  }
+
+  async function replyToMessage(messageId, reply) {
+    await _rpc('reply_to_support_message', { message_id: messageId, reply_text: reply });
+    return { success: true };
+  }
+
+  async function deleteSupportMessage(messageId) {
+    await _delete('/support_messages?id=eq.' + messageId);
+    return { success: true };
+  }
+
+  /* ============================================================
+     UNLOCK CODES / QR
+     ============================================================ */
+  async function getUnlockCodes() {
+    var rows = await _get('/unlock_codes', {
+      'order':  'is_redeemed.asc,code.asc',
+      'select': '*'
+    });
+    return { success: true, codes: rows || [] };
+  }
+
+  async function insertUnlockCode(code, characterId, characterName) {
+    var res = await fetch(SUPABASE_URL + '/rest/v1/unlock_codes', {
+      method: 'POST',
+      headers: Object.assign({}, _headers(), { 'Prefer': 'return=representation' }),
+      body: JSON.stringify({ code: code, character_id: characterId, character_name: characterName, is_redeemed: false })
+    });
+    var json = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error((json && json.message) || ('HTTP ' + res.status));
+    return { success: true };
+  }
+
+  async function deleteUnlockCode(code) {
+    await _delete('/unlock_codes?code=eq.' + encodeURIComponent(code));
+    return { success: true };
+  }
+
+  /* ============================================================
+     NFT / TCG BATCHES
+     ============================================================ */
+  async function publishNft(nftObj) {
+    var batchPayload = {
+      id:           nftObj.id,
+      name:         nftObj.name        || '',
+      description:  nftObj.description || '',
+      image:        nftObj.image       || '',
+      character_id: nftObj.name        || nftObj.id,
+      created_by:   session.userId
+    };
+
+    var batchRes = await fetch(SUPABASE_URL + '/rest/v1/tcg_batches', {
+      method: 'POST',
+      headers: Object.assign({}, _headers(), { 'Prefer': 'return=minimal' }),
+      body: JSON.stringify(batchPayload)
+    });
+    if (!batchRes.ok) {
+      var e1 = await batchRes.json().catch(function() { return {}; });
+      throw new Error((e1 && e1.message) || ('Batch insert failed: HTTP ' + batchRes.status));
+    }
+
+    var codes = (nftObj.codes || []).map(function(c) {
+      return {
+        code:           c.token,
+        character_id:   batchPayload.character_id,
+        character_name: nftObj.name,
+        is_redeemed:    false,
+        batch_id:       nftObj.id,
+        serial:         c.serial || '',
+        redeem_url:     c.url    || ''
+      };
+    });
+
+    if (codes.length > 0) {
+      var codesRes = await fetch(SUPABASE_URL + '/rest/v1/unlock_codes', {
+        method: 'POST',
+        headers: Object.assign({}, _headers(), { 'Prefer': 'return=minimal' }),
+        body: JSON.stringify(codes)
+      });
+      if (!codesRes.ok) {
+        var e2 = await codesRes.json().catch(function() { return {}; });
+        throw new Error((e2 && e2.message) || ('Codes insert failed: HTTP ' + codesRes.status));
+      }
+    }
+
+    return { success: true, id: nftObj.id };
+  }
+
+  async function getNfts() {
+    var batches = await _get('/tcg_batches', {
+      'order': 'created_at.desc', 'select': '*'
+    }).catch(function() { return []; });
+
+    if (!batches || batches.length === 0) return { success: true, nfts: [] };
+
+    var batchIds = batches.map(function(b) { return b.id; }).join(',');
+    var allCodes = await _get('/unlock_codes', {
+      'batch_id': 'in.(' + batchIds + ')',
+      'select':   'code,serial,redeem_url,is_redeemed,redeemed_at,batch_id'
+    }).catch(function() { return []; });
+
+    var codesByBatch = {};
+    (allCodes || []).forEach(function(c) {
+      if (!codesByBatch[c.batch_id]) codesByBatch[c.batch_id] = [];
+      codesByBatch[c.batch_id].push({
+        token:      c.code,
+        serial:     c.serial     || '',
+        url:        c.redeem_url || '',
+        redeemed:   c.is_redeemed,
+        redeemedAt: c.redeemed_at || null
+      });
+    });
+
+    var nfts = batches.map(function(b) {
+      return {
+        id:          b.id,
+        name:        b.name,
+        description: b.description,
+        image:       b.image,
+        createdAt:   b.created_at,
+        codes:       codesByBatch[b.id] || []
+      };
+    });
+
+    return { success: true, nfts: nfts };
+  }
+
+  async function redeemToken(token) {
+    var rows = await _get('/unlock_codes', {
+      'code': 'eq.' + token, 'select': '*'
+    }).catch(function() { return []; });
+
+    if (!rows || rows.length === 0) return { success: false, error: 'Invalid token.' };
+    var code = rows[0];
+    if (code.is_redeemed) return { success: false, error: 'This token has already been redeemed.' };
+
+    var patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/unlock_codes?code=eq.' + encodeURIComponent(token),
+      {
+        method: 'PATCH',
+        headers: Object.assign({}, _headers(), { 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ is_redeemed: true, redeemed_at: new Date().toISOString() })
+      }
+    );
+    if (!patchRes.ok) {
+      var err = await patchRes.json().catch(function() { return {}; });
+      return { success: false, error: (err && err.message) || 'Failed to redeem token.' };
+    }
+
+    var nft = { name: code.character_name, image: '', description: '' };
+    if (code.batch_id) {
+      var batches = await _get('/tcg_batches', {
+        'id': 'eq.' + code.batch_id, 'select': 'name,image,description'
+      }).catch(function() { return []; });
+      if (batches && batches[0]) nft = batches[0];
+    }
+
+    return {
+      success: true,
+      nft:  nft,
+      code: { token: code.code, serial: code.serial || '', redeemedAt: new Date().toISOString() }
+    };
+  }
+
+  async function clearAll() {
+    var res = await fetch(SUPABASE_URL + '/rest/v1/tcg_batches', {
+      method: 'DELETE',
+      headers: _headers()
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function() { return {}; });
+      throw new Error((err && err.message) || 'Failed to clear all TCGs.');
+    }
+    return { success: true };
+  }
+
+  /* ============================================================
+     CLOUDINARY
+     ============================================================ */
+  var CLOUDINARY_DEFAULTS = { cloudName: 'djgvzbxvt', uploadPreset: 'Community_Feed' };
+
+  function getCloudinaryConfig() {
+    try {
+      var saved = localStorage.getItem('kangi_cloudinary_config');
+      if (saved) {
+        var p = JSON.parse(saved);
+        if (p.cloudName && p.uploadPreset) return p;
+      }
+    } catch(e) {}
+    return CLOUDINARY_DEFAULTS;
+  }
+
+  function saveCloudinaryConfig(cloudName, uploadPreset) {
+    try {
+      localStorage.setItem('kangi_cloudinary_config', JSON.stringify({ cloudName: cloudName, uploadPreset: uploadPreset }));
+      return true;
+    } catch(e) { return false; }
+  }
+
+  function uploadToCloudinary(file, resourceType, onProgress) {
+    resourceType = resourceType || 'auto';
+    return new Promise(function(resolve) {
+      var cfg = getCloudinaryConfig();
+      if (!cfg || !cfg.cloudName) {
+        resolve({ success: false, error: 'Cloudinary not configured.' });
         return;
       }
-      const cleanEmail = email.trim();
-
-      PlayFabClientSDK.SendAccountRecoveryEmail(
-        {
-          TitleId: TITLE_ID,
-          Email: cleanEmail
-        },
-        (result, error) => {
-          if (error) {
-            reject(_friendlyError(error));
-            return;
-          }
-
-          resolve({
-            success: true,
-            message: 'Password reset link has been sent to your email address! Please check your inbox.'
-          });
-        }
-      );
-    });
-  }
-
-  const SESSION_STORAGE_KEY = 'kangi_admin_session_v2';
-
-  /* The admin session is deliberately NOT persisted across page loads.
-     ---------------------------------------------------------------------------
-     This used to write the PlayFab sessionTicket into localStorage and sign the
-     admin straight back in on reload. The ticket expires server-side long before
-     anything here notices, and nothing validated it on the way back in — so a
-     reload would restore a dead ticket, render the full dashboard as though the
-     admin were signed in, and then fail every PlayFab call it made. That is what
-     made songs and QR data silently stop loading: the UI looked authenticated
-     while the server was rejecting it.
-
-     A reload now signs the admin out and shows the login page, which is both what
-     the dashboard should do with a privileged account and the only state that
-     cannot be stale.
-
-     Both functions are kept rather than deleted: they are part of the exported
-     surface and are called from the login flow and app boot. */
-  function _saveSessionToStorage(ticket) {
-    // Intentionally does not persist. Kept so the login flow's call site stays
-    // honest about where a session would have been written.
-    void ticket;
-    _purgeStoredSession();
-  }
-
-  function restoreSession() {
-    // Never restores. Any session written by an older build of the dashboard is
-    // cleared here, so admins carrying one are flushed out on their next load
-    // instead of being let in on a ticket nothing can validate.
-    _purgeStoredSession();
-    return null;
-  }
-
-  function _purgeStoredSession() {
-    try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (e) {}
-  }
-
-  function _clearSession() {
-    session.playFabId   = null;
-    session.email       = null;
-    session.displayName = null;
-    session.avatarUrl   = null;
-    session.isAdmin     = false;
-    try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (e) {}
-  }
-
-  /* ============================================================
-     NFT DATA  (mirrors nftQrWorkflow CloudScript handlers)
-     ============================================================ */
-
-  /* Call the CloudScript nftQrWorkflow handler */
-  function _callNftScript(action, args) {
-    return new Promise((resolve, reject) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:       'nftQrWorkflow',
-          FunctionParameter:  { action, ...args },
-          GeneratePlayStreamEvent: true
-        },
-        (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          const fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server function.'); return; }
-          if (fn.error) { reject(fn.error); return; }
-          resolve(fn);
-        }
-      );
-    });
-  }
-
-  /* Fetch all NFTs */
-  function getNfts() { return _callNftScript('getNfts', {}); }
-
-  /* Publish a new NFT batch */
-  function publishNft(nftData) { return _callNftScript('publishNft', { nftData }); }
-
-  /* Redeem a token */
-  function redeemToken(token) { return _callNftScript('redeemToken', { token }); }
-
-  /* Wipe all NFT data */
-  function clearAll() { return _callNftScript('clearAll', {}); }
-
-  /* ============================================================
-     SONGS & MUSIC DATA  (calls videoAppWorkflow)
-     ============================================================ */
-
-  /* Call the CloudScript videoAppWorkflow handler */
-  function _callVideoScript(action, args) {
-    return new Promise((resolve, reject) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:       'videoAppWorkflow',
-          FunctionParameter:  { action, ...args },
-          GeneratePlayStreamEvent: true
-        },
-        (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          const fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server function.'); return; }
-          let parsed = fn;
-          if (typeof fn === 'string') {
-            try {
-              parsed = JSON.parse(fn);
-            } catch (e) {
-              reject('Invalid response format.');
-              return;
-            }
-          }
-          if (parsed.error) { reject(parsed.error); return; }
-          resolve(parsed);
-        }
-      );
-    });
-  }
-
-  /* Fetch all pending, approved, and total songs */
-  function getSongs() { return _callVideoScript('getSongs', {}); }
-
-  /* Approve a pending song */
-  function approveSong(songId) { return _callVideoScript('approveSong', { adminData: { songId } }); }
-
-  /* Update which modes a song appears in, and its trim window (seconds).
-     trimEnd of 0 means play to the natural end of the file. */
-  function updateSongSettings(songId, modes, trimStart, trimEnd) {
-    return _callVideoScript('updateSongSettings', {
-      adminData: {
-        songId:    songId,
-        modes:     Array.isArray(modes) ? modes : [],
-        trimStart: Number(trimStart) || 0,
-        trimEnd:   Number(trimEnd)   || 0
+      var fd = new FormData();
+      fd.append('file', file);
+      fd.append('upload_preset', cfg.uploadPreset);
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://api.cloudinary.com/v1_1/' + cfg.cloudName + '/' + resourceType + '/upload', true);
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = function(e) {
+          if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100), e.loaded, e.total);
+        };
       }
-    });
-  }
-
-  /* Delete a song from server catalog */
-  function deleteSong(songId) { return _callVideoScript('deleteSong', { adminData: { songId } }); }
-
-  /* Submit / Upload a new song using existing CloudScript functions (submitSong + approveSong)
-     submitSong always stores the song as pending — CloudScript forces isPending = true and
-     ignores whatever the caller sent — so "Publish immediately" is really a second call to
-     approveSong. That second call can fail on its own, and its failure used to vanish:
-     approveSong reports a missing song as { success:false, message:... } with no `error`
-     key, so _callVideoScript resolves rather than rejects, and the try/catch here never
-     ran. The upload then reported success while the song sat in Pending.
-
-     The result is now inspected, retried once, and reported back to the caller. The retry
-     is deliberate: submitSong and approveSong are separate CloudScript round trips that
-     read-modify-write the same Title Internal Data key, so the likeliest failure is the
-     approve reading the catalog before the submit's write has landed. */
-  async function addSong(songData, autoApprove = true) {
-    const res = await _callVideoScript('submitSong', { songData });
-    if (!res || res.success === false) {
-      throw new Error(res?.error || res?.message || 'Failed to submit song.');
-    }
-
-    if (!autoApprove || !songData.SongId) {
-      return { ...res, approved: false, autoApproveRequested: false };
-    }
-
-    const _tryApprove = async () => {
-      try {
-        const ar = await approveSong(songData.SongId);
-        // A resolved call is not a successful one — check the flag, not the promise.
-        if (ar && ar.success) return { ok: true };
-        return { ok: false, error: ar?.error || ar?.message || 'Server did not confirm the approval.' };
-      } catch (eApprove) {
-        return { ok: false, error: eApprove?.message || eApprove || 'Approval call failed.' };
-      }
-    };
-
-    let attempt = await _tryApprove();
-    if (!attempt.ok) {
-      await new Promise(r => setTimeout(r, 600));
-      attempt = await _tryApprove();
-    }
-
-    if (!attempt.ok) {
-      console.warn('[Kangi] Song submitted but auto-approve failed:', attempt.error);
-    }
-    return { ...res, approved: attempt.ok, autoApproveRequested: true, approveError: attempt.ok ? null : attempt.error };
-  }
-
-  /* ============================================================
-     USER MANAGEMENT  (calls adminUserWorkflow)
-     ============================================================ */
-
-  /* Internal helper for adminUserWorkflow CloudScript */
-  function _callAdminScript(action, args) {
-    return new Promise((resolve, reject) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:            'adminUserWorkflow',
-          FunctionParameter:       { action, ...args },
-          GeneratePlayStreamEvent: true
-        },
-        (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          const fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server function.'); return; }
-          if (fn.error) { reject(fn.error); return; }
-          resolve(fn);
-        }
-      );
-    });
-  }
-
-  /* Grant admin role — accepts email or playFabId */
-  function makeAdmin(email, playFabId)   { return _callAdminScript('makeAdmin',   { email: email || '', playFabId: playFabId || '' }); }
-
-  /* Revoke admin role — accepts email or playFabId */
-  function revokeAdmin(email, playFabId) { return _callAdminScript('revokeAdmin', { email: email || '', playFabId: playFabId || '' }); }
-
-  /* Toggle ShowLogs for a specific user — accepts email or playFabId */
-  function setUserShowLogs(email, playFabId, showLogs) {
-    return _callAdminScript('setUserShowLogs', { email: email || '', playFabId: playFabId || '', showLogs: !!showLogs });
-  }
-
-  /* Query user data flags (IsAdmin, ShowLogs, IsPremium) */
-  function getUserDataFlags(playFabId) {
-    return _callAdminScript('getUserDataFlags', { playFabId: playFabId || '' });
-  }
-
-  /* Register current user — no-op acknowledgment, kept for compatibility */
-  function registerUser() {
-    return _callAdminScript('registerUser', {
-      email:       session.email       || '',
-      displayName: session.displayName || '',
-      avatarUrl:   ''
-    });
-  }
-
-  /* Step 1: Start a PlayFab export for all players in the given segment.
-     Returns { exportId, status:'pending' } or { success:false, error } */
-  function getAllUsers(segmentId) {
-    return _callAdminScript('getAllUsers', {
-      segmentId: segmentId || ''
-    });
-  }
-
-  /* Step 2: Poll/download the export started by getAllUsers.
-     Returns { status:'pending' } while processing, or
-             { status:'complete', users:[...] } when done. */
-  function getExportResult(exportId, segmentId) {
-    return _callAdminScript('getExportResult', {
-      exportId:  exportId  || '',
-      segmentId: segmentId || ''
-    });
-  }
-
-  /* Ban a user — accepts email, playFabId, and optional duration in days (0 = permanent) */
-  function banUser(email, playFabId, durationDays)   { 
-    return _callAdminScript('banUser', { 
-      email: email || '', 
-      playFabId: playFabId || '',
-      durationDays: durationDays !== undefined ? durationDays : 0
-    }); 
-  }
-
-  /* Get user's unlocked characters from their regular UserData (Player Data).
-     Uses a CloudScript call so we can read another player's data server-side.
-     Returns raw NFT IDs — the caller resolves names using the NFT library.   */
-  function getUserCharacters(playFabId) {
-    return new Promise((resolve) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:       'adminUserWorkflow',
-          FunctionParameter:  { action: 'getPlayerCharacters', playFabId: playFabId || '' },
-          GeneratePlayStreamEvent: false
-        },
-        (result, error) => {
-          if (error || !result?.data?.FunctionResult) {
-            resolve({ unlockedCharacters: [] });
-            return;
+      xhr.onload = function() {
+        try {
+          var d = JSON.parse(xhr.responseText || '{}');
+          if (xhr.status >= 200 && xhr.status < 300 && d.secure_url) {
+            if (onProgress) onProgress(100, file.size, file.size);
+            resolve({ success: true, url: d.secure_url, data: d });
+          } else {
+            resolve({ success: false, error: (d.error && d.error.message) || ('HTTP ' + xhr.status) });
           }
-          const fn = result.data.FunctionResult;
-          resolve({ unlockedCharacters: Array.isArray(fn.unlockedCharacters) ? fn.unlockedCharacters : [] });
-        }
-      );
+        } catch(err) { resolve({ success: false, error: err.message }); }
+      };
+      xhr.onerror   = function() { resolve({ success: false, error: 'Network error.' }); };
+      xhr.ontimeout = function() { resolve({ success: false, error: 'Request timed out.' }); };
+      xhr.send(fd);
     });
   }
 
-  /* Unban a user — accepts email or playFabId */
-  function unbanUser(email, playFabId) { return _callAdminScript('unbanUser', { email: email || '', playFabId: playFabId || '' }); }
-
-  /* Premium — grants or revokes the ability to upload music. Sets IsPremium in
-     the player's PlayFab UserData, which the Unity client reads before showing
-     the upload screen. */
-  function makePremium(email, playFabId)   { return _callAdminScript('makePremium',   { email: email || '', playFabId: playFabId || '' }); }
-  function revokePremium(email, playFabId) { return _callAdminScript('revokePremium', { email: email || '', playFabId: playFabId || '' }); }
-
   /* ============================================================
-     APP CONFIGURATION (In-Game Console & Remote Toggles)
+     SUPABASE STORAGE
      ============================================================ */
-
-  /* Fetch global App Configuration (e.g. ShowLogs title data) */
-  function getAppConfig() {
-    return _callAdminScript('getAppConfig', {});
+  function uploadToStorage(file, bucket, storagePath, onProgress) {
+    return new Promise(function(resolve) {
+      var url = SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + storagePath;
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('apikey', SUPABASE_ANON);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.setRequestHeader('x-upsert', 'true');
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = function(e) {
+          if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100));
+        };
+      }
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          var publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + bucket + '/' + storagePath;
+          resolve({ success: true, url: publicUrl });
+        } else {
+          resolve({ success: false, error: 'Upload failed: HTTP ' + xhr.status + ' - ' + xhr.responseText });
+        }
+      };
+      xhr.onerror   = function() { resolve({ success: false, error: 'Network error during upload.' }); };
+      xhr.ontimeout = function() { resolve({ success: false, error: 'Upload timed out.' }); };
+      xhr.send(file);
+    });
   }
 
-  /* Set In-Game Debug Console ShowLogs flag */
-  function setShowLogs(showLogs) {
-    return _callAdminScript('setShowLogs', { showLogs: !!showLogs });
-  }
-
   /* ============================================================
-     IMAGE UTIL — resize + compress before storing
+     IMAGE UTIL
      ============================================================ */
-  function resizeImage(file, maxWidth = 240) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+  function resizeImage(file, maxWidth) {
+    maxWidth = maxWidth || 240;
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
       reader.onerror = reject;
-      reader.onload = (e) => {
-        const img = new Image();
+      reader.onload = function(e) {
+        var img = new Image();
         img.onerror = reject;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let w = img.width, h = img.height;
+        img.onload = function() {
+          var canvas = document.createElement('canvas');
+          var w = img.width, h = img.height;
           if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
@@ -569,637 +670,76 @@ const KangiService = (function () {
     });
   }
 
-  /* ── Error Helper (mirrors GetFriendlyError in C#) ── */
-  function _friendlyError(err) {
-    const code = err?.errorCode ?? err?.error ?? '';
-    const msg  = err?.errorMessage ?? err?.message ?? 'An unexpected error occurred.';
-    const map  = {
-      1001: 'Invalid email address.',
-      1002: 'Incorrect password. Please try again.',
-      1009: 'No account found with this email address.',
-      1246: 'This email is already registered.',
-      1212: 'Incorrect email or password.'
-    };
-    return map[code] || msg;
-  }
-
-  /* Fetch all notifications for a given PlayFab ID (admin reading another player's list) */
-  function getNotifications(targetPlayFabId) {
-    return new Promise((resolve, reject) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:            'notificationWorkflow',
-          FunctionParameter:       {
-            action:          'getNotifications',
-            targetPlayFabId: targetPlayFabId
-          },
-          GeneratePlayStreamEvent: false
-        },
-        (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          const fn = result?.data?.FunctionResult;
-          if (!fn) { reject('No response from server.'); return; }
-          if (fn.error) { reject(fn.error); return; }
-          resolve(fn);
-        }
-      );
-    });
-  }
-
-  /* Send a custom notification to a user by PlayFab ID */
-  function sendNotification(targetPlayFabId, title, message, type, data) {
-    return new Promise((resolve, reject) => {
-      if (!targetPlayFabId) {
-        resolve({ success: false, error: 'No PlayFab ID provided for notification target.' });
-        return;
-      }
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:            'notificationWorkflow',
-          FunctionParameter:       {
-            action:          'sendNotification',
-            targetPlayFabId: targetPlayFabId,
-            title:           title,
-            message:         message,
-            type:            type  || 'info',
-            data:            data  || {}
-          },
-          GeneratePlayStreamEvent: true
-        },
-        (result, error) => {
-          if (error) { reject(_friendlyError(error)); return; }
-          const fn = result?.data?.FunctionResult;
-          if (!fn) { resolve({ success: false, error: 'No response from server.' }); return; }
-          // fn.error means a handled server-side failure — resolve so caller can show it
-          if (fn.error && !fn.success) { resolve({ success: false, error: fn.error }); return; }
-          resolve(fn);
-        }
-      );
-    });
-  }
-
-  /* ── Support / Admin Inbox ── */
-  function _callSupportScript(action, args) {
-    return new Promise((resolve, reject) => {
-      PlayFabClientSDK.ExecuteCloudScript(
-        {
-          FunctionName:            'supportWorkflow',
-          FunctionParameter:       { action, ...args },
-          GeneratePlayStreamEvent: true
-        },
-        (result, error) => {
-          if (error) {
-            console.error('[DWM] supportWorkflow error:', error);
-            reject(_friendlyError(error));
-            return;
-          }
-          // FunctionResult can be an object or a JSON string depending on SDK version
-          let fn = result?.data?.FunctionResult;
-          console.log('[DWM] supportWorkflow raw result:', JSON.stringify(fn));
-          if (!fn) { resolve({ success: false, messages: [], error: 'No response from server.' }); return; }
-          if (typeof fn === 'string') {
-            try { fn = JSON.parse(fn); } catch (e) {
-              resolve({ success: false, messages: [], error: 'Invalid server response.' });
-              return;
-            }
-          }
-          // Don't reject on server-side errors — resolve so caller can handle gracefully
-          resolve(fn);
-        }
-      );
-    });
-  }
-
-  /* Get all user support messages (admin only) */
-  function getSupportMessages() { return _callSupportScript('getMessages', {}); }
-
-  /* Reply to a support message */
-  function replyToMessage(messageId, reply) {
-    return _callSupportScript('replyMessage', { messageId, reply });
-  }
-
-  /* Delete a support message */
-  function deleteSupportMessage(messageId) {
-    return _callSupportScript('deleteMessage', { messageId });
+  /* ============================================================
+     FIREBASE STUBS (removed)
+     ============================================================ */
+  function getFirebaseConfig()         { return {}; }
+  function saveFirebaseConfig()        { return false; }
+  function ensureFirebaseAuth()        { return Promise.resolve(null); }
+  function tryAutoFirebaseAuth()       { return Promise.resolve(false); }
+  function testFirebaseConnection()    {
+    return Promise.resolve({ success: false, error: 'Firebase removed. Using Supabase.' });
   }
 
   /* ============================================================
-     CLOUDINARY CDN — Upload images to cloud storage
-     Cloud Name:     djgvzbxvt
-     Upload Preset:  Community_Feed  (unsigned)
+     PUBLIC API
      ============================================================ */
-
-  const CLOUDINARY_DEFAULTS = {
-    cloudName:    'djgvzbxvt',
-    uploadPreset: 'Community_Feed'
-  };
-
-  /* Get Cloudinary config — localStorage override, falls back to hardcoded defaults */
-  function getCloudinaryConfig() {
-    try {
-      const saved = localStorage.getItem('kangi_cloudinary_config');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.cloudName && parsed.uploadPreset) return parsed;
-      }
-    } catch (e) {}
-    // Always return defaults so the app works out of the box
-    return CLOUDINARY_DEFAULTS;
-  }
-
-  /* Save Cloudinary config to localStorage */
-  function saveCloudinaryConfig(cloudName, uploadPreset) {
-    try {
-      localStorage.setItem('kangi_cloudinary_config', JSON.stringify({ cloudName, uploadPreset }));
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /* Upload file to Cloudinary using unsigned upload
-     Supports resourceType: 'auto', 'image', 'video', 'raw' (default: 'auto')
-     Supports optional onProgress callback: onProgress(percentage, loadedBytes, totalBytes)
-     Returns { success: true, url: "https://..." } or { success: false, error: "..." } */
-  function uploadToCloudinary(file, resourceType = 'auto', onProgress = null) {
-    return new Promise((resolve) => {
-      const config = getCloudinaryConfig();
-      if (!config || !config.cloudName || !config.uploadPreset) {
-        resolve({ success: false, error: 'Cloudinary not configured. Go to Settings → TCG Image Storage and enter your credentials.' });
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('upload_preset', config.uploadPreset);
-
-      const type = resourceType || 'auto';
-      const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/${type}/upload`;
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', uploadUrl, true);
-
-      if (xhr.upload && typeof onProgress === 'function') {
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable && e.total > 0) {
-            const percent = Math.min(100, Math.round((e.loaded / e.total) * 100));
-            onProgress(percent, e.loaded, e.total);
-          }
-        };
-      }
-
-      xhr.onload = () => {
-        try {
-          const data = JSON.parse(xhr.responseText || '{}');
-          if (xhr.status >= 200 && xhr.status < 300) {
-            if (data.secure_url) {
-              if (typeof onProgress === 'function') onProgress(100, file.size || 1, file.size || 1);
-              resolve({ success: true, url: data.secure_url, data: data });
-            } else {
-              resolve({ success: false, error: 'No URL returned from Cloudinary.' });
-            }
-          } else {
-            const msg = data?.error?.message || `Upload failed with status ${xhr.status}`;
-            resolve({ success: false, error: msg });
-          }
-        } catch (err) {
-          resolve({ success: false, error: `Invalid response from Cloudinary (${xhr.status}): ${err.message}` });
-        }
-      };
-
-      xhr.onerror = () => {
-        resolve({ success: false, error: 'Network error occurred while uploading to Cloudinary.' });
-      };
-
-      xhr.ontimeout = () => {
-        resolve({ success: false, error: 'Upload request timed out.' });
-      };
-
-      xhr.send(formData);
-    });
-  }
-
-  /* ============================================================
-     FIREBASE SERVICE — Player List Source
-     Fetches player list from Cloud Firestore or Realtime Database.
-     ============================================================ */
-
-  const FIREBASE_CONFIG_KEY = 'kangi_firebase_config';
-
-  const DEFAULT_FIREBASE_CONFIG = {
-    apiKey:            "AIzaSyBArP6gJqVhhdDTZ2XLINBYIvPMmON7EFM",
-    authDomain:        "dance-withmii.firebaseapp.com",
-    projectId:         "dance-withmii",
-    storageBucket:     "dance-withmii.firebasestorage.app",
-    messagingSenderId: "227901605532",
-    appId:             "1:227901605532:web:a01759182a1d1546db4f59",
-    measurementId:     "G-ZPTK46HEBC",
-    dbType:            "firestore",
-    collectionName:    "users",
-    adminEmail:        "alisiyal2764@gmail.com",
-    adminPassword:     "Kashan@1",
-    databaseURL:       ""
-  };
-
-  /* Default or saved Firebase Config */
-  function getFirebaseConfig() {
-    try {
-      const saved = localStorage.getItem(FIREBASE_CONFIG_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.projectId || parsed.apiKey) {
-          // Only let saved keys with a real value win. A config saved from the
-          // Settings form before the admin credentials were hardcoded stores
-          // them as "", which would otherwise clobber the defaults below.
-          const overrides = {};
-          Object.keys(parsed).forEach(k => {
-            if (parsed[k] !== '' && parsed[k] !== null && parsed[k] !== undefined) {
-              overrides[k] = parsed[k];
-            }
-          });
-          if (overrides.adminPassword === 'Kasahn@1') {
-            overrides.adminPassword = DEFAULT_FIREBASE_CONFIG.adminPassword;
-          }
-          return { ...DEFAULT_FIREBASE_CONFIG, ...overrides };
-        }
-      }
-    } catch (e) {
-      console.warn('[Firebase] Failed to parse saved config:', e);
-    }
-    return { ...DEFAULT_FIREBASE_CONFIG };
-  }
-
-  /* Save Firebase Config */
-  function saveFirebaseConfig(config) {
-    try {
-      if (!config) {
-        localStorage.removeItem(FIREBASE_CONFIG_KEY);
-        return true;
-      }
-      localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
-      // Drop any cached session so edited credentials take effect immediately.
-      _adminAuthPromise = null;
-      try {
-        if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
-          firebase.auth().signOut();
-        }
-      } catch (eSignOut) {}
-      // Re-init if SDK available
-      initFirebase(config);
-      return true;
-    } catch (e) {
-      console.error('[Firebase] Save config error:', e);
-      return false;
-    }
-  }
-
-  /* Initialize Firebase App instance */
-  let _firebaseApp = null;
-  function initFirebase(customConfig) {
-    if (typeof firebase === 'undefined') {
-      console.warn('[Firebase] Firebase SDK not loaded in window.');
-      return null;
-    }
-    const config = customConfig || getFirebaseConfig();
-    if (!config || (!config.apiKey && !config.projectId)) {
-      return null;
-    }
-    try {
-      if (firebase.apps && firebase.apps.length > 0) {
-        // Find or delete existing default app if config changed
-        _firebaseApp = firebase.apps[0];
-      } else {
-        _firebaseApp = firebase.initializeApp({
-          apiKey:            config.apiKey,
-          authDomain:        config.authDomain || (config.projectId ? `${config.projectId}.firebaseapp.com` : undefined),
-          projectId:         config.projectId,
-          storageBucket:     config.storageBucket || (config.projectId ? `${config.projectId}.appspot.com` : undefined),
-          messagingSenderId: config.messagingSenderId,
-          appId:             config.appId,
-          databaseURL:       config.databaseURL
-        });
-      }
-      return _firebaseApp;
-    } catch (err) {
-      console.error('[Firebase] initFirebase error:', err);
-      return null;
-    }
-  }
-
-  /* Sign in to Firebase Auth as the admin.
-
-     Firestore rules scope the players collection to known uids, so an
-     unauthenticated read is rejected. Resolves to the signed-in user, or throws
-     with a message the settings panel can surface. */
-  let _adminAuthPromise = null;
-  async function ensureFirebaseAuth(config) {
-    const cfg = config || getFirebaseConfig();
-    if (typeof firebase === 'undefined' || !firebase.auth) {
-      throw new Error('Firebase Auth SDK is not loaded.');
-    }
-
-    // The app must exist before firebase.auth() is usable — callers reaching
-    // here directly (e.g. the post-login card check) may be the first to touch it.
-    initFirebase(cfg);
-
-    const current = firebase.auth().currentUser;
-    if (current) return current;
-
-    if (!cfg.adminEmail || !cfg.adminPassword) {
-      throw new Error('Firebase admin sign-in is not configured. Add the admin email and password in Settings.');
-    }
-
-    // Collapse concurrent callers onto one sign-in round trip.
-    if (!_adminAuthPromise) {
-      _adminAuthPromise = firebase.auth()
-        .signInWithEmailAndPassword(cfg.adminEmail, cfg.adminPassword)
-        .then(cred => cred.user)
-        .catch(err => {
-          _adminAuthPromise = null;
-          throw new Error('Firebase admin sign-in failed: ' + (err.message || err.code || 'unknown error'));
-        });
-    }
-    return _adminAuthPromise;
-  }
-
-  /* Opportunistic Firebase sign-in using the SAME credentials the admin just
-     used to log into this dashboard (PlayFab). The two systems are separate —
-     Firebase Auth was provisioned with a matching email, but there is no
-     guarantee the passwords match, so this is a convenience, not a dependency.
-
-     On success: Settings never needs to be touched, on any device, by any
-     admin who shares this login. On failure: swallowed entirely. Dashboard
-     login has already succeeded by the time this runs, so a Firebase mismatch
-     must never surface as a login error — the existing Settings flow remains
-     the fallback. Nothing here is written to localStorage. */
-  async function tryAutoFirebaseAuth(email, password) {
-    try {
-      if (typeof firebase === 'undefined' || !firebase.auth) return false;
-      initFirebase(getFirebaseConfig());
-      if (firebase.auth().currentUser) return true;
-
-      await firebase.auth().signInWithEmailAndPassword(email, password);
-      return true;
-    } catch (err) {
-      console.log('[Firebase] Auto sign-in did not match dashboard credentials — Settings will be needed.', err.code || err.message);
-      return false;
-    }
-  }
-
-  /* Test connection to Firebase */
-  async function testFirebaseConnection(config) {
-    const app = initFirebase(config);
-    if (!app && typeof firebase === 'undefined') {
-      return { success: false, error: 'Firebase SDK is not available in browser.' };
-    }
-    const cfg = config || getFirebaseConfig();
-    if (!cfg || (!cfg.apiKey && !cfg.projectId)) {
-      return { success: false, error: 'Firebase configuration is empty. Please enter Project ID and API Key.' };
-    }
-
-    const dbType = cfg.dbType || 'firestore';
-    const collectionName = (cfg.collectionName || 'users').trim();
-
-    try {
-      await ensureFirebaseAuth(cfg);
-
-      if (dbType === 'rtdb') {
-        if (!cfg.databaseURL) {
-          return { success: false, error: 'Realtime Database requires a Database URL (e.g. https://<project>.firebaseio.com).' };
-        }
-        const db = firebase.database();
-        const snapshot = await db.ref(collectionName).limitToFirst(5).once('value');
-        const count = snapshot.numChildren ? snapshot.numChildren() : 0;
-        return { success: true, message: `Connected to Realtime Database successfully! Found ${count} record(s).` };
-      } else {
-        const db = firebase.firestore();
-        const snapshot = await db.collection(collectionName).limit(5).get();
-        return { success: true, message: `Connected to Cloud Firestore successfully! Found ${snapshot.size} document(s) in "${collectionName}".` };
-      }
-    } catch (err) {
-      console.error('[Firebase] Connection test error:', err);
-      return { success: false, error: err.message || 'Failed to connect to Firebase.' };
-    }
-  }
-
-  /* Fetch all player records from Firebase and normalize structure */
-  async function getFirebaseUsers() {
-    const cfg = getFirebaseConfig();
-    if (!cfg || (!cfg.apiKey && !cfg.projectId)) {
-      console.log('[Firebase] No Firebase config saved, falling back to live PlayFab registry.');
-      const pfResult = await getAllUsers();
-      if (pfResult && pfResult.status === 'complete' && Array.isArray(pfResult.users)) {
-        return {
-          source: 'playfab-fallback',
-          users: pfResult.users,
-          isFallback: true
-        };
-      }
-      return { source: 'none', users: [], isFallback: true };
-    }
-
-    const app = initFirebase(cfg);
-    if (!app && typeof firebase === 'undefined') {
-      throw new Error('Firebase SDK is not loaded.');
-    }
-
-    try {
-      await ensureFirebaseAuth(cfg);
-    } catch (authErr) {
-      console.warn('[Firebase] ensureFirebaseAuth failed, attempting Firestore query / PlayFab fallback:', authErr?.message || authErr);
-    }
-
-    const dbType = cfg.dbType || 'firestore';
-    const collectionName = (cfg.collectionName || 'users').trim();
-    let rawList = [];
-
-    try {
-      if (dbType === 'rtdb') {
-        const db = firebase.database();
-        const snapshot = await db.ref(collectionName).once('value');
-        const val = snapshot.val();
-        if (val) {
-          if (Array.isArray(val)) {
-            rawList = val.filter(Boolean);
-          } else if (typeof val === 'object') {
-            rawList = Object.keys(val).map(key => ({ _fbKey: key, ...val[key] }));
-          }
-        }
-      } else {
-        const db = firebase.firestore();
-        const snapshot = await db.collection(collectionName).get();
-        snapshot.forEach(doc => {
-          rawList.push({ _fbDocId: doc.id, ...doc.data() });
-        });
-      }
-    } catch (dbErr) {
-      console.warn('[Firebase] Failed to fetch users from Firebase, falling back to PlayFab:', dbErr?.message || dbErr);
-    }
-
-    // If Firebase returned no users, attempt PlayFab fallback
-    if (!rawList.length) {
-      console.log('[Firebase] 0 users in Firebase, falling back to PlayFab live registry.');
-      try {
-        const pfResult = await getAllUsers();
-        if (pfResult && pfResult.status === 'complete' && Array.isArray(pfResult.users) && pfResult.users.length > 0) {
-          return {
-            source: 'playfab-fallback',
-            users: pfResult.users,
-            isFallback: true
-          };
-        }
-      } catch (pfErr) {
-        console.warn('[PlayFab] Fallback user fetch error:', pfErr);
-      }
-    }
-
-    // Normalize each user record
-    const normalizedUsers = rawList.map(item => {
-      const playFabId = item.playFabId || item.PlayFabId || item.playfabId || item.playfab_id || item.uid || item.userId || item._fbDocId || item._fbKey || '';
-      const displayName = item.displayName || item.DisplayName || item.name || item.Name || item.playerName || item.player_name || item.username || item.userName || '';
-      const email = item.email || item.Email || item.userEmail || '';
-      const avatarUrl = item.avatarUrl || item.avatar || item.photoURL || item.photoUrl || item.image || item.imageUrl || '';
-      const isBanned = !!(item.isBanned || item.banned || item.banStatus);
-      const isAdmin = !!(item.isAdmin || item.admin || item.is_admin);
-      const created = item.createdAt || item.created || item.joined || item.created_at || null;
-      const lastLogin = item.lastLogin || item.last_login || item.lastSeen || item.updatedAt || null;
-
-      return {
-        playFabId: String(playFabId),
-        displayName: displayName || (email ? email.split('@')[0] : (playFabId ? 'Player ' + String(playFabId).slice(-4) : 'Player')),
-        email: email,
-        username: item.username || '',
-        avatarUrl: avatarUrl,
-        isBanned: isBanned,
-        isAdmin: isAdmin,
-        created: created ? (typeof created === 'object' && created.toDate ? created.toDate().toISOString() : created) : null,
-        lastLogin: lastLogin ? (typeof lastLogin === 'object' && lastLogin.toDate ? lastLogin.toDate().toISOString() : lastLogin) : null,
-        unlockedCharacters: Array.isArray(item.unlockedCharacters) ? item.unlockedCharacters : [],
-        rawFirebaseData: item
-      };
-    });
-
-    // Sort alphabetically by displayName / name
-    normalizedUsers.sort((a, b) => {
-      const nameA = (a.displayName || a.username || a.email || '').toLowerCase();
-      const nameB = (b.displayName || b.username || b.email || '').toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
-
-    return {
-      source: 'firebase',
-      collection: collectionName,
-      dbType: dbType,
-      users: normalizedUsers,
-      isFallback: false
-    };
-  }
-
-  /* Fetch comprehensive internal details on-demand via PlayFab API */
-  async function getPlayFabUserDetails(playFabId) {
-    if (!playFabId) {
-      return { success: false, error: 'No PlayFab ID provided.' };
-    }
-
-    try {
-      const [charRes, notifRes, flagRes] = await Promise.allSettled([
-        getUserCharacters(playFabId),
-        getNotifications(playFabId),
-        getUserDataFlags(playFabId)
-      ]);
-
-      const unlockedCharacters = (charRes.status === 'fulfilled' && charRes.value && Array.isArray(charRes.value.unlockedCharacters))
-        ? charRes.value.unlockedCharacters
-        : [];
-
-      const notifications = (notifRes.status === 'fulfilled' && notifRes.value && Array.isArray(notifRes.value.notifications))
-        ? notifRes.value.notifications
-        : [];
-
-      const flags = (flagRes.status === 'fulfilled' && flagRes.value) ? flagRes.value : {};
-
-      return {
-        success: true,
-        playFabId,
-        unlockedCharacters,
-        notifications,
-        isAdmin: !!flags.isAdmin,
-        showLogs: !!flags.showLogs,
-        isPremium: !!flags.isPremium,
-        isBanned: !!flags.isBanned,
-        bannedUntil: flags.bannedUntil || '',
-        banReason: flags.banReason || ''
-      };
-    } catch (err) {
-      console.error('[PlayFab] Error fetching internal details for', playFabId, err);
-      return {
-        success: false,
-        playFabId,
-        unlockedCharacters: [],
-        notifications: [],
-        isAdmin: false,
-        showLogs: false,
-        isPremium: false,
-        isBanned: false,
-        bannedUntil: '',
-        banReason: '',
-        error: err?.message || 'Failed to fetch PlayFab internal data.'
-      };
-    }
-  }
-
-  /* ── Public API ── */
   return {
-    init,
-    login,
-    loadAdminIdentity,
-    getAdminIdentity,
-    logout,
-    restoreSession,
-    sendAccountRecoveryEmail,
-    session,
-    getNfts,
-    publishNft,
-    redeemToken,
-    clearAll,
-    resizeImage,
-    getSongs,
-    addSong,
-    approveSong,
-    deleteSong,
-    updateSongSettings,
-    makeAdmin,
-    revokeAdmin,
-    setUserShowLogs,
-    getUserDataFlags,
-    registerUser,
-    getAllUsers,
-    getExportResult,
-    banUser,
-    unbanUser,
-    makePremium,
-    revokePremium,
-    getAppConfig,
-    setShowLogs,
-    getUserCharacters,
-    sendNotification,
-    getNotifications,
-    getSupportMessages,
-    replyToMessage,
-    deleteSupportMessage,
-    getCloudinaryConfig,
-    saveCloudinaryConfig,
-    uploadToCloudinary,
-    // Firebase & PlayFab Deep Fetch APIs
-    getFirebaseConfig,
-    saveFirebaseConfig,
-    initFirebase,
-    testFirebaseConnection,
-    ensureFirebaseAuth,
-    tryAutoFirebaseAuth,
-    getFirebaseUsers,
-    getPlayFabUserDetails
+    login:                  login,
+    logout:                 logout,
+    sendAccountRecoveryEmail: sendAccountRecoveryEmail,
+    restoreSession:         restoreSession,
+    getAdminIdentity:       getAdminIdentity,
+
+    getSongs:               getSongs,
+    approveSong:            approveSong,
+    deleteSong:             deleteSong,
+    updateSongSettings:     updateSongSettings,
+    addSong:                addSong,
+
+    getAllUsers:             getAllUsers,
+    getUserDataFlags:       getUserDataFlags,
+    makeAdmin:              makeAdmin,
+    revokeAdmin:            revokeAdmin,
+    makePremium:            makePremium,
+    revokePremium:          revokePremium,
+    banUser:                banUser,
+    unbanUser:              unbanUser,
+    getUserCharacters:      getUserCharacters,
+
+    getVideos:              getVideos,
+    deleteVideo:            deleteVideo,
+
+    getNotifications:       getNotifications,
+    sendNotification:       sendNotification,
+    broadcastNotification:  broadcastNotification,
+
+    getSupportMessages:     getSupportMessages,
+    replyToMessage:         replyToMessage,
+    deleteSupportMessage:   deleteSupportMessage,
+
+    getUnlockCodes:         getUnlockCodes,
+    insertUnlockCode:       insertUnlockCode,
+    deleteUnlockCode:       deleteUnlockCode,
+
+    publishNft:             publishNft,
+    getNfts:                getNfts,
+    redeemToken:            redeemToken,
+    clearAll:               clearAll,
+
+    uploadToCloudinary:     uploadToCloudinary,
+    uploadToStorage:        uploadToStorage,
+    getCloudinaryConfig:    getCloudinaryConfig,
+    saveCloudinaryConfig:   saveCloudinaryConfig,
+    resizeImage:            resizeImage,
+
+    getFirebaseConfig:      getFirebaseConfig,
+    saveFirebaseConfig:     saveFirebaseConfig,
+    ensureFirebaseAuth:     ensureFirebaseAuth,
+    tryAutoFirebaseAuth:    tryAutoFirebaseAuth,
+    testFirebaseConnection: testFirebaseConnection,
+
+    get session() { return session; }
   };
 
 })();
-
