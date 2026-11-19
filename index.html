@@ -74,6 +74,7 @@
             <span class="btn-text">Sign in &rarr;</span>
             <span class="btn-loader hidden"></span>
           </button>
+
         </form>
 
         <!-- Forgot Password Form -->
@@ -687,6 +688,38 @@
 
           <!-- Cloudinary CDN Config (hidden — credentials hardcoded as defaults) -->
           <div class="card settings-card" style="display:none;"></div>
+
+          <!-- Grant Admin by Email -->
+          <div class="card settings-card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3a1 1 0 012 0v5.5a.5.5 0 001 0V4a1 1 0 112 0v4.5a.5.5 0 001 0V6a1 1 0 112 0v5a7 7 0 11-14 0V9a1 1 0 012 0v2.5a.5.5 0 001 0V4a1 1 0 012 0v4.5a.5.5 0 001 0V3z" clip-rule="evenodd"/></svg>
+                Grant Admin by Email
+              </h3>
+            </div>
+            <div class="settings-card-body">
+              <p class="setting-desc" style="margin-bottom:1rem;color:var(--text-2);">
+                Enter the email of a registered user to grant them admin access. The user must have already created an account via the app or register page.
+              </p>
+              <div id="grantAdminAlert" class="alert hidden" style="margin-bottom:1rem;"></div>
+              <div style="display:flex;gap:0.6rem;align-items:flex-start;flex-wrap:wrap;">
+                <input id="grantAdminEmail" type="email"
+                  placeholder="user@example.com"
+                  style="flex:1;min-width:200px;background:rgba(255,255,255,0.05);border:1px solid rgba(168,85,247,0.3);border-radius:10px;padding:0.65rem 1rem;color:var(--text);font-size:0.88rem;outline:none;" />
+                <button id="grantAdminBtn" class="btn btn-primary" style="white-space:nowrap;">
+                  🛡️ Make Admin
+                </button>
+              </div>
+              <div style="margin-top:1rem;display:flex;gap:0.6rem;align-items:flex-start;flex-wrap:wrap;">
+                <input id="revokeAdminEmail" type="email"
+                  placeholder="user@example.com"
+                  style="flex:1;min-width:200px;background:rgba(255,255,255,0.05);border:1px solid rgba(168,85,247,0.3);border-radius:10px;padding:0.65rem 1rem;color:var(--text);font-size:0.88rem;outline:none;" />
+                <button id="revokeAdminBtn" class="btn btn-secondary" style="white-space:nowrap;">
+                  ❌ Revoke Admin
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- Account Session & Logout -->
           <div class="card settings-card card-danger">

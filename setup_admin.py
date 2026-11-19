@@ -28,7 +28,7 @@ import os
 import webbrowser
 
 # ── Config ────────────────────────────────────────────────────
-SUPABASE_URL   = "https://hjmqwvcivejmtuwofras.supabase.co"
+SUPABASE_URL   = "https://bfqwlcjflbybhltiflkt.supabase.co"
 ANON_KEY       = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
     "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcXdsY2pmbGJ5YmhsdGlmbGt0Iiw"
@@ -137,11 +137,11 @@ def step_confirm_and_admin():
 
     print("""
   SQL Editor link:
-  https://supabase.com/dashboard/project/hjmqwvcivejmtuwofras/sql/new
+  https://supabase.com/dashboard/project/bfqwlcjflbybhltiflkt/sql/new
 """)
     # Open SQL editor automatically
     try:
-        webbrowser.open("https://supabase.com/dashboard/project/hjmqwvcivejmtuwofras/sql/new")
+        webbrowser.open("https://supabase.com/dashboard/project/bfqwlcjflbybhltiflkt/sql/new")
         print("  🌐  SQL Editor browser mein open ho raha hai...")
     except Exception:
         pass

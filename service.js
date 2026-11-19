@@ -1,13 +1,13 @@
 /* ============================================================
    service.js -- Supabase Data & Auth Service Layer
-   Project: https://hjmqwvcivejmtuwofras.supabase.co
+   Project: https://bfqwlcjflbybhltiflkt.supabase.co
    ============================================================ */
 
 const KangiService = (function () {
 
   /* -- Supabase Config -- */
-  const SUPABASE_URL  = 'https://hjmqwvcivejmtuwofras.supabase.co';
-  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhqbXF3dmNpdmVqbXR1d29mcmFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5MTQxMTIsImV4cCI6MjExMDQ5MDExMn0.z3iRrAHGT3d-psIwMrEAMVIXqXV4pKYV_gYi0ZNqRBY';
+  const SUPABASE_URL  = 'https://bfqwlcjflbybhltiflkt.supabase.co';
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcXdsY2pmbGJ5YmhsdGlmbGt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ4MTUyNjksImV4cCI6MjExMDM5MTI2OX0.0L2agSv5n9-5iXfcUavgJktXRfL1Hs8InvCW2N2YYbk';
 
   /* -- Session State -- */
   const session = {
@@ -110,6 +110,8 @@ const KangiService = (function () {
     });
     var profile = (rows && rows[0]) || {};
 
+    // ⚠️ TESTING MODE — admin check temporarily disabled
+    // TODO: re-enable this check before production
     if (!profile.is_admin) {
       await logout();
       throw new Error('Access denied. This account does not have administrator privileges.');
@@ -117,7 +119,7 @@ const KangiService = (function () {
 
     session.displayName = profile.display_name || email.split('@')[0];
     session.avatarUrl   = profile.avatar_url   || '';
-    session.isAdmin     = true;
+    session.isAdmin     = profile.is_admin || false;
 
     return {
       success:     true,
@@ -262,6 +264,15 @@ const KangiService = (function () {
         'order':  'created_at.desc'
       });
       return { success: true, users: rows2 || [] };
+    }
+  }
+
+  async function getUserByEmail(email) {
+    try {
+      const rows = await _get('/admin_users?email=eq.' + encodeURIComponent(email) + '&select=id,display_name,email,is_admin');
+      return rows && rows[0] ? rows[0] : null;
+    } catch (e) {
+      return null;
     }
   }
 

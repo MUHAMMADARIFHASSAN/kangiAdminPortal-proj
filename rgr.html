@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register Admin — Kangi Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* ── Page layout ── */
+    .rgr-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .rgr-card {
+      background: rgba(20, 8, 40, 0.90);
+      border: 1px solid rgba(168,85,247,0.25);
+      border-radius: 20px;
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 8px 40px rgba(168,85,247,0.15);
+      backdrop-filter: blur(12px);
+    }
+
+    .rgr-logo {
+      text-align: center;
+      margin-bottom: 1.8rem;
+    }
+    .rgr-logo h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #ec4899, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: 0 0 0.3rem;
+    }
+    .rgr-logo p {
+      font-size: 0.82rem;
+      color: var(--text-3);
+      margin: 0;
+    }
+
+    /* ── Form ── */
+    .rgr-form .field {
+      margin-bottom: 1.1rem;
+    }
+    .rgr-form label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--text-3);
+      margin-bottom: 0.4rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .rgr-form input {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(168,85,247,0.3);
+      border-radius: 10px;
+      padding: 0.7rem 1rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      box-sizing: border-box;
+    }
+    .rgr-form input:focus {
+      border-color: rgba(236,72,153,0.7);
+      box-shadow: 0 0 0 3px rgba(236,72,153,0.12);
+    }
+    .rgr-form input::placeholder { color: rgba(255,255,255,0.3); }
+
+    /* ── Token field ── */
+    .token-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .token-row input { flex: 1; }
+    .token-row button {
+      background: rgba(168,85,247,0.15);
+      border: 1px solid rgba(168,85,247,0.4);
+      border-radius: 10px;
+      color: var(--text-2);
+      font-size: 0.75rem;
+      padding: 0 0.9rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .token-row button:hover { background: rgba(168,85,247,0.3); }
+
+    /* ── Strength bar ── */
+    .strength-bar {
+      height: 3px;
+      border-radius: 2px;
+      margin-top: 0.4rem;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .strength-fill {
+      height: 100%;
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s, background 0.3s;
+    }
+
+    /* ── Submit ── */
+    .rgr-submit {
+      width: 100%;
+      padding: 0.85rem;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, #ec4899, #a855f7);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: opacity 0.2s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .rgr-submit:hover  { opacity: 0.9; }
+    .rgr-submit:active { transform: scale(0.98); }
+    .rgr-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Alert ── */
+    .rgr-alert {
+      border-radius: 10px;
+      padding: 0.7rem 1rem;
+      font-size: 0.82rem;
+      margin-bottom: 1.1rem;
+      display: none;
+    }
+    .rgr-alert.show  { display: block; }
+    .rgr-alert.error   { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
+    .rgr-alert.success { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); color: #6ee7b7; }
+    .rgr-alert.info    { background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.3); color: var(--text-3); }
+
+    /* ── Loader ── */
+    .btn-loader {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .rgr-submit.loading .btn-loader { display: block; }
+    .rgr-submit.loading .btn-text   { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Footer ── */
+    .rgr-footer {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.78rem;
+      color: var(--text-3);
+    }
+    .rgr-footer a {
+      color: var(--pink);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .rgr-footer a:hover { text-decoration: underline; }
+
+    /* ── Token hint ── */
+    .hint { font-size: 0.72rem; color: rgba(255,255,255,0.35); margin-top: 0.3rem; }
+
+    /* ── Success state ── */
+    .success-screen {
+      text-align: center;
+      display: none;
+    }
+    .success-screen.show { display: block; }
+    .success-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+    }
+    .success-screen h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+    }
+    .success-screen p {
+      font-size: 0.85rem;
+      color: var(--text-2);
+      margin: 0 0 1.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="rgr-wrap">
+    <div class="rgr-card">
+
+      <!-- Logo / Title -->
+      <div class="rgr-logo">
+        <h1>🛡️ Kangi Admin</h1>
+        <p>Register a new admin account</p>
+      </div>
+
+      <!-- Alert -->
+      <div id="rgrAlert" class="rgr-alert"></div>
+
+      <!-- Registration Form -->
+      <form id="rgrForm" class="rgr-form" autocomplete="off">
+
+        <div class="field">
+          <label for="rgrName">Display Name</label>
+          <input id="rgrName" type="text" placeholder="e.g. Ali Siyal" required />
+        </div>
+
+        <div class="field">
+          <label for="rgrEmail">Email Address</label>
+          <input id="rgrEmail" type="email" placeholder="admin@example.com" required />
+        </div>
+
+        <div class="field">
+          <label for="rgrPass">Password</label>
+          <input id="rgrPass" type="password" placeholder="Min 8 chars, letters + numbers" required />
+          <div class="strength-bar"><div id="strengthFill" class="strength-fill"></div></div>
+        </div>
+
+        <div class="field">
+          <label for="rgrConfirm">Confirm Password</label>
+          <input id="rgrConfirm" type="password" placeholder="Repeat password" required />
+        </div>
+
+        <div class="field">
+          <label for="rgrToken">Admin Registration Token <span style="color:rgba(255,255,255,0.4);font-weight:400;">(required)</span></label>
+          <div class="token-row">
+            <input id="rgrToken" type="password" placeholder="Enter secret token" required />
+            <button type="button" id="toggleToken">Show</button>
+          </div>
+          <div class="hint">Ask your super-admin for the registration token.</div>
+        </div>
+
+        <button type="submit" class="rgr-submit" id="rgrBtn">
+          <div class="btn-loader"></div>
+          <span class="btn-text">Create Admin Account →</span>
+        </button>
+      </form>
+
+      <!-- Success screen (shown after registration) -->
+      <div id="successScreen" class="success-screen">
+        <div class="success-icon">✅</div>
+        <h2>Admin Account Created!</h2>
+        <p id="successMsg">Your account has been registered and granted admin access.</p>
+        <a href="index.html" class="rgr-submit" style="text-decoration:none;">Go to Dashboard →</a>
+      </div>
+
+      <div class="rgr-footer">
+        Already have an account? <a href="index.html">Sign in</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ================================================================
+       rgr.html — Admin Registration Page
+       Accessible at: http://localhost:8080/rgr.html
+
+       Security model:
+         - Requires a REGISTRATION_TOKEN that only you know
+         - Token is compared client-side (suitable for local/trusted use)
+         - After signup, grants is_admin = true via Supabase RPC
+         - For production: move token check to a Supabase Edge Function
+       ================================================================ */
+
+    const SUPABASE_URL  = 'https://bfqwlcjflbybhltiflkt.supabase.co';
+    const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcXdsY2pmbGJ5YmhsdGlmbGt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ4MTUyNjksImV4cCI6MjExMDM5MTI2OX0.0L2agSv5n9-5iXfcUavgJktXRfL1Hs8InvCW2N2YYbk';
+
+    // ── Change this to your own secret token ──────────────────────
+    // Anyone who knows this token can create an admin account.
+    // Keep it private — share only with trusted team members.
+    const REGISTRATION_TOKEN = 'kangi-admin-2024';
+    // ─────────────────────────────────────────────────────────────
+
+    const form        = document.getElementById('rgrForm');
+    const btn         = document.getElementById('rgrBtn');
+    const alert       = document.getElementById('rgrAlert');
+    const successScr  = document.getElementById('successScreen');
+    const successMsg  = document.getElementById('successMsg');
+    const passInput   = document.getElementById('rgrPass');
+    const toggleTok   = document.getElementById('toggleToken');
+    const tokInput    = document.getElementById('rgrToken');
+    const strengthFill= document.getElementById('strengthFill');
+
+    /* ── Token visibility toggle ── */
+    toggleTok.addEventListener('click', () => {
+      const isHidden = tokInput.type === 'password';
+      tokInput.type = isHidden ? 'text' : 'password';
+      toggleTok.textContent = isHidden ? 'Hide' : 'Show';
+    });
+
+    /* ── Password strength indicator ── */
+    passInput.addEventListener('input', () => {
+      const v = passInput.value;
+      let score = 0;
+      if (v.length >= 8)  score++;
+      if (/[A-Z]/.test(v)) score++;
+      if (/[0-9]/.test(v)) score++;
+      if (/[^A-Za-z0-9]/.test(v)) score++;
+
+      const pct   = (score / 4) * 100;
+      const color = score <= 1 ? '#ef4444' : score === 2 ? '#f59e0b' : score === 3 ? '#a855f7' : '#10b981';
+      strengthFill.style.width    = pct + '%';
+      strengthFill.style.background = color;
+    });
+
+    /* ── Alert helpers ── */
+    function showAlert(msg, type) {
+      alert.textContent = msg;
+      alert.className   = 'rgr-alert show ' + type;
+    }
+    function hideAlert() {
+      alert.className = 'rgr-alert';
+    }
+
+    /* ── Loading state ── */
+    function setLoading(on) {
+      btn.disabled = on;
+      btn.classList.toggle('loading', on);
+    }
+
+    /* ── Supabase helpers ── */
+    async function supaPost(path, body, token) {
+      const headers = { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(SUPABASE_URL + path, {
+        method: 'POST', headers, body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error_description || json.message || json.msg || ('HTTP ' + res.status));
+      return json;
+    }
+
+    async function supaGet(path, token) {
+      const res = await fetch(SUPABASE_URL + path, {
+        headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + token }
+      });
+      return res.json().catch(() => ([]));
+    }
+
+    async function supaPatch(path, body, token) {
+      const res = await fetch(SUPABASE_URL + '/rest/v1' + path, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON,
+          'Authorization': 'Bearer ' + token,
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(body)
+      });
+      return res.ok;
+    }
+
+    /* ── Form submit ── */
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideAlert();
+
+      const name    = document.getElementById('rgrName').value.trim();
+      const email   = document.getElementById('rgrEmail').value.trim();
+      const pass    = document.getElementById('rgrPass').value;
+      const confirm = document.getElementById('rgrConfirm').value;
+      const token   = document.getElementById('rgrToken').value.trim();
+
+      /* ── Validation ── */
+      if (!name)                      return showAlert('Please enter your display name.',          'error');
+      if (!email || !email.includes('@')) return showAlert('Please enter a valid email address.', 'error');
+      if (pass.length < 8)            return showAlert('Password must be at least 8 characters.', 'error');
+      if (!/[A-Za-z]/.test(pass) || !/[0-9]/.test(pass))
+        return showAlert('Password must contain letters and numbers.', 'error');
+      if (pass !== confirm)           return showAlert('Passwords do not match.',                  'error');
+      if (!token)                     return showAlert('Registration token is required.',           'error');
+      // Token is validated server-side by register_as_admin() RPC — not checked here
+      // so it's never exposed in browser source code.
+
+      setLoading(true);
+      showAlert('Creating account…', 'info');
+
+      try {
+        /* Step 1: Signup */
+        const signupRes = await supaPost('/auth/v1/signup', {
+          email,
+          password: pass,
+          data: { display_name: name }
+        });
+
+        const userId = signupRes.user?.id || signupRes.id;
+        if (!userId) throw new Error('Signup failed — no user ID returned.');
+
+        /* Step 2: Login immediately — works when email confirmation is OFF */
+        let accessToken = signupRes.access_token;
+        if (!accessToken) {
+          showAlert('Logging in…', 'info');
+          const loginRes = await supaPost('/auth/v1/token?grant_type=password', {
+            email, password: pass
+          });
+          accessToken = loginRes.access_token;
+          if (!accessToken) {
+            throw new Error(
+              'Email confirmation is required. ' +
+              'Go to Supabase → Authentication → Email and turn OFF "Confirm email", then try again.'
+            );
+          }
+        }
+
+        /* Step 3: Grant admin via server-side RPC (bypasses column-level security) */
+        showAlert('Granting admin access…', 'info');
+        const rpcRes = await fetch(SUPABASE_URL + '/rest/v1/rpc/register_as_admin', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON,
+            'Authorization': 'Bearer ' + accessToken
+          },
+          body: JSON.stringify({ reg_token: REGISTRATION_TOKEN })
+        });
+        const rpcData = await rpcRes.json().catch(() => ({}));
+
+        if (!rpcRes.ok || rpcData?.success === false) {
+          throw new Error(rpcData?.error || rpcData?.message || 'Failed to grant admin access.');
+        }
+
+        /* Step 4: Verify is_admin was set */
+        const profile = await supaGet('/rest/v1/profiles?id=eq.' + userId + '&select=is_admin', accessToken);
+        const isAdmin = Array.isArray(profile) && profile[0]?.is_admin === true;
+
+        /* ── Success ── */
+        form.style.display = 'none';
+        successMsg.textContent = isAdmin
+          ? `Admin account created for ${email}. You can now sign in to the dashboard.`
+          : `Account created but admin grant failed. Run: UPDATE profiles SET is_admin=true WHERE id='${userId}'; in SQL Editor.`;
+        successScr.classList.add('show');
+
+      } catch (err) {
+        showAlert(err.message || 'Registration failed. Please try again.', 'error');
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>
