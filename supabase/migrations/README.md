@@ -13,6 +13,7 @@ Run these files **in order** in the Supabase Dashboard → SQL Editor.
 | `007_support_messages.sql` | support_messages table + reply function; `is_premium` + `settings` columns; `qr_codes` & `songs` storage buckets |
 | `008_security_columns.sql` | Locks admin/banned/premium columns (no client self-grant); admin RPCs `set_admin_status` / `set_premium_status`; public read of profile display name + avatar |
 | `009_songs_full_columns.sql` | Extends `songs` with modes/trim/uploader fields + `songs` audio storage bucket |
+| `016_admin_actions_server_guard.sql` | Server-side guard: only a non-banned admin can make admin / premium / ban / unban (trigger on `profiles` + hardened RPCs + `am_i_admin()` for dashboard login); removes `register_as_admin` |
 
 ## How to run
 

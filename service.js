@@ -116,16 +116,24 @@ const KangiService = (function () {
     }
     var profile = (rows && rows[0]) || {};
 
-    // ⚠️ TESTING MODE — admin check temporarily disabled
-    // TODO: re-enable this check before production
-    // if (!profile.is_admin) {
-    //   await logout();
-    //   throw new Error('Access denied. This account does not have administrator privileges.');
-    // }
+    // Admin check is decided by the server (am_i_admin → is_admin_user():
+    // admin flag AND not banned). Admin RPCs re-check on every action.
+    var isAdmin = false;
+    try {
+      isAdmin = (await _rpc('am_i_admin')) === true;
+    } catch (e) {
+      // Migration 016 not deployed yet → fall back to the profile flag.
+      if (String(e.message).indexOf('am_i_admin') === -1) throw e;
+      isAdmin = profile.is_admin === true && !profile.is_banned;
+    }
+    if (!isAdmin) {
+      await logout();
+      throw new Error('Access denied. This account does not have administrator privileges.');
+    }
 
     session.displayName = profile.display_name || email.split('@')[0];
     session.avatarUrl   = profile.avatar_url   || '';
-    session.isAdmin     = profile.is_admin || false;
+    session.isAdmin     = true;
 
     return {
       success:     true,
