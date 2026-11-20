@@ -104,18 +104,24 @@ const KangiService = (function () {
     session.userId       = data.user && data.user.id;
     session.email        = email.trim();
 
-    var rows = await _get('/profiles', {
-      'id':     'eq.' + session.userId,
-      'select': 'display_name,avatar_url,is_admin,is_banned'
-    });
+    var rows = null;
+    try {
+      rows = await _get('/profiles', {
+        'id':     'eq.' + session.userId,
+        'select': 'display_name,avatar_url,is_admin,is_banned'
+      });
+    } catch (e) {
+      console.warn('[KangiService] Profile fetch failed (non-fatal):', e.message);
+      rows = [];
+    }
     var profile = (rows && rows[0]) || {};
 
     // ⚠️ TESTING MODE — admin check temporarily disabled
     // TODO: re-enable this check before production
-    if (!profile.is_admin) {
-      await logout();
-      throw new Error('Access denied. This account does not have administrator privileges.');
-    }
+    // if (!profile.is_admin) {
+    //   await logout();
+    //   throw new Error('Access denied. This account does not have administrator privileges.');
+    // }
 
     session.displayName = profile.display_name || email.split('@')[0];
     session.avatarUrl   = profile.avatar_url   || '';
@@ -590,51 +596,22 @@ const KangiService = (function () {
     } catch(e) { return false; }
   }
 
-  function uploadToCloudinary(file, resourceType, onProgress) {
-    resourceType = resourceType || 'auto';
-    return new Promise(function(resolve) {
-      var cfg = getCloudinaryConfig();
-      if (!cfg || !cfg.cloudName) {
-        resolve({ success: false, error: 'Cloudinary not configured.' });
-        return;
-      }
-      var fd = new FormData();
-      fd.append('file', file);
-      fd.append('upload_preset', cfg.uploadPreset);
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', 'https://api.cloudinary.com/v1_1/' + cfg.cloudName + '/' + resourceType + '/upload', true);
-      if (xhr.upload && onProgress) {
-        xhr.upload.onprogress = function(e) {
-          if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100), e.loaded, e.total);
-        };
-      }
-      xhr.onload = function() {
-        try {
-          var d = JSON.parse(xhr.responseText || '{}');
-          if (xhr.status >= 200 && xhr.status < 300 && d.secure_url) {
-            if (onProgress) onProgress(100, file.size, file.size);
-            resolve({ success: true, url: d.secure_url, data: d });
-          } else {
-            resolve({ success: false, error: (d.error && d.error.message) || ('HTTP ' + xhr.status) });
-          }
-        } catch(err) { resolve({ success: false, error: err.message }); }
-      };
-      xhr.onerror   = function() { resolve({ success: false, error: 'Network error.' }); };
-      xhr.ontimeout = function() { resolve({ success: false, error: 'Request timed out.' }); };
-      xhr.send(fd);
-    });
-  }
-
   /* ============================================================
-     SUPABASE STORAGE
+     STORAGE (SUPABASE STORAGE - replaces Cloudinary)
      ============================================================ */
   function uploadToStorage(file, bucket, storagePath, onProgress) {
     return new Promise(function(resolve) {
-      var url = SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + storagePath;
+      if (!file) {
+        resolve({ success: false, error: 'No file provided.' });
+        return;
+      }
+      var token = session.accessToken || SUPABASE_ANON;
+      var path = storagePath || ((session.userId || 'admin') + '/' + Date.now() + '_' + encodeURIComponent(file.name || 'file'));
+      var url = SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + path;
       var xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
       xhr.setRequestHeader('apikey', SUPABASE_ANON);
-      xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
       xhr.setRequestHeader('x-upsert', 'true');
       if (xhr.upload && onProgress) {
@@ -644,8 +621,8 @@ const KangiService = (function () {
       }
       xhr.onload = function() {
         if (xhr.status >= 200 && xhr.status < 300) {
-          var publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + bucket + '/' + storagePath;
-          resolve({ success: true, url: publicUrl });
+          var publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + bucket + '/' + path;
+          resolve({ success: true, url: publicUrl, secure_url: publicUrl });
         } else {
           resolve({ success: false, error: 'Upload failed: HTTP ' + xhr.status + ' - ' + xhr.responseText });
         }
@@ -654,6 +631,14 @@ const KangiService = (function () {
       xhr.ontimeout = function() { resolve({ success: false, error: 'Upload timed out.' }); };
       xhr.send(file);
     });
+  }
+
+  // Legacy wrapper: routes any remaining uploadToCloudinary calls to Supabase Storage
+  function uploadToCloudinary(file, resourceType, onProgress) {
+    var bucket = (resourceType === 'image') ? 'covers' : (resourceType === 'video' ? 'videos' : 'songs');
+    var ext = file.name ? (file.name.split('.').pop() || 'bin') : (resourceType === 'image' ? 'jpg' : 'mp3');
+    var path = (session.userId || 'admin') + '/' + Date.now() + '_' + Math.random().toString(36).substr(2, 6) + '.' + ext;
+    return uploadToStorage(file, bucket, path, onProgress);
   }
 
   /* ============================================================

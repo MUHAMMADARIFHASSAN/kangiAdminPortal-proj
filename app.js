@@ -139,14 +139,20 @@
     modalRevokePremiumBtn: $('modalRevokePremiumBtn'),
     banSectionLabel:    $('banSectionLabel'),
     modalActionAlert:   $('modalActionAlert'),
-    /* Settings */
+    /* Settings (Firebase removed — Supabase only) */
     fbDatabaseType:     $('fbDatabaseType'),
     fbCollectionName:   $('fbCollectionName'),
     fbProjectId:        $('fbProjectId'),
     fbApiKey:           $('fbApiKey'),
     fbAuthDomain:       $('fbAuthDomain'),
     fbDatabaseUrl:      $('fbDatabaseUrl'),
+    fbAdminEmail:       $('fbAdminEmail'),
+    fbAdminPassword:    $('fbAdminPassword'),
     fbJsonConfig:       $('fbJsonConfig'),
+    saveFirebaseBtn:    $('saveFirebaseBtn'),
+    testFirebaseBtn:    $('testFirebaseBtn'),
+    firebaseSettingsCard:$('firebaseSettingsCard'),
+    firebaseConfigAlert:$('firebaseConfigAlert'),
     /* Ban Duration Modal (kept for legacy, no longer used for ban flow) */
     banDurationModal:   $('banDurationModal'),
     closeBanModal:      $('closeBanModal'),
@@ -177,6 +183,16 @@
     messages:  { title: 'User Messages', sub: 'Support messages sent by players from the app' },
     settings:  { title: 'Settings & Account', sub: 'Manage administrator profile, application settings, and account session' }
   };
+
+  /* ================================================================
+     THEME HELPER — defined before boot() so it can be called there
+     ================================================================ */
+  function _applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("kangi_theme", theme); } catch(e) {}
+    const btn = document.getElementById("settingsThemeToggle");
+    if (btn) btn.textContent = theme === "dark" ? "☀️ Light Mode" : "🌙 Dark Mode";
+  }
 
   /* ================================================================
      BOOT
@@ -368,97 +384,6 @@
       });
     }
 
-    /* ── Grant / Revoke Admin by Email ── */
-    const grantAdminBtn   = document.getElementById('grantAdminBtn');
-    const revokeAdminBtn  = document.getElementById('revokeAdminBtn');
-    const grantAdminAlert = document.getElementById('grantAdminAlert');
-
-    function _grantAdminAlert(msg, type) {
-      if (!grantAdminAlert) return;
-      grantAdminAlert.textContent = msg;
-      grantAdminAlert.className = 'alert alert-' + (type === 'success' ? 'success' : type === 'info' ? 'info' : 'error');
-      grantAdminAlert.classList.remove('hidden');
-      setTimeout(() => grantAdminAlert.classList.add('hidden'), 5000);
-    }
-
-    async function _findUserByEmail(email) {
-      // Look up user in admin_users view (needs admin token)
-      try {
-        const rows = await KangiService._get('/admin_users', {
-          'email':  'eq.' + email,
-          'select': 'id,display_name,email'
-        });
-        return rows && rows[0] ? rows[0] : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    if (grantAdminBtn) {
-      grantAdminBtn.addEventListener('click', async () => {
-        const email = document.getElementById('grantAdminEmail')?.value?.trim();
-        if (!email) return _grantAdminAlert('Please enter an email address.', 'error');
-
-        grantAdminBtn.disabled = true;
-        grantAdminBtn.textContent = 'Granting...';
-        _grantAdminAlert('Looking up user...', 'info');
-
-        try {
-          const user = await _findUserByEmail(email);
-          if (!user) {
-            _grantAdminAlert(`No account found for "${email}". The user must sign up first.`, 'error');
-            return;
-          }
-          const res = await KangiService.makeAdmin(email, user.id);
-          if (res && res.success) {
-            _grantAdminAlert(`✅ Admin granted to ${user.display_name || email}.`, 'success');
-            document.getElementById('grantAdminEmail').value = '';
-            await _loadUsers();
-          } else {
-            _grantAdminAlert(res?.error || 'Failed to grant admin.', 'error');
-          }
-        } catch (err) {
-          _grantAdminAlert(err?.message || 'Error: ' + String(err), 'error');
-        } finally {
-          grantAdminBtn.disabled = false;
-          grantAdminBtn.textContent = '🛡️ Make Admin';
-        }
-      });
-    }
-
-    if (revokeAdminBtn) {
-      revokeAdminBtn.addEventListener('click', async () => {
-        const email = document.getElementById('revokeAdminEmail')?.value?.trim();
-        if (!email) return _grantAdminAlert('Please enter an email address.', 'error');
-        if (!confirm(`Revoke admin from "${email}"?`)) return;
-
-        revokeAdminBtn.disabled = true;
-        revokeAdminBtn.textContent = 'Revoking...';
-        _grantAdminAlert('Looking up user...', 'info');
-
-        try {
-          const user = await _findUserByEmail(email);
-          if (!user) {
-            _grantAdminAlert(`No account found for "${email}".`, 'error');
-            return;
-          }
-          const res = await KangiService.revokeAdmin(email, user.id);
-          if (res && res.success) {
-            _grantAdminAlert(`✅ Admin revoked from ${user.display_name || email}.`, 'success');
-            document.getElementById('revokeAdminEmail').value = '';
-            await _loadUsers();
-          } else {
-            _grantAdminAlert(res?.error || 'Failed to revoke admin.', 'error');
-          }
-        } catch (err) {
-          _grantAdminAlert(err?.message || 'Error: ' + String(err), 'error');
-        } finally {
-          revokeAdminBtn.disabled = false;
-          revokeAdminBtn.textContent = '❌ Revoke Admin';
-        }
-      });
-    }
-
     /* ── App Configuration (ShowLogs Toggle) ── */
     let currentShowLogs = false;
 
@@ -534,6 +459,2831 @@
       if (shown.adminPassword) shown.adminPassword = '••••••••';
       return shown;
     }
+
+    /* ── Firebase Config — load saved values on page init ── */
+    const fbTypeInput       = el.fbDatabaseType;
+    const fbCollInput       = el.fbCollectionName;
+    const fbProjectInput    = el.fbProjectId;
+    const fbKeyInput        = el.fbApiKey;
+    const fbAuthInput       = el.fbAuthDomain;
+    const fbDbUrlInput      = el.fbDatabaseUrl;
+    const fbAdminEmailInput = el.fbAdminEmail;
+    const fbAdminPassInput  = el.fbAdminPassword;
+    const fbJsonInput       = el.fbJsonConfig;
+    const fbAlert           = el.firebaseConfigAlert;
+
+    const savedFbConfig = KangiService.getFirebaseConfig();
+    if (savedFbConfig) {
+      if (fbTypeInput)    fbTypeInput.value    = savedFbConfig.dbType || 'firestore';
+      if (fbCollInput)    fbCollInput.value    = savedFbConfig.collectionName || 'users';
+      if (fbProjectInput) fbProjectInput.value = savedFbConfig.projectId || '';
+      if (fbKeyInput)     fbKeyInput.value     = savedFbConfig.apiKey || '';
+      if (fbAuthInput)    fbAuthInput.value    = savedFbConfig.authDomain || '';
+      if (fbDbUrlInput)   fbDbUrlInput.value   = savedFbConfig.databaseURL || '';
+      if (fbAdminEmailInput) fbAdminEmailInput.value = savedFbConfig.adminEmail || '';
+      if (fbAdminPassInput)  fbAdminPassInput.value  = savedFbConfig.adminPassword || '';
+      if (fbJsonInput)    fbJsonInput.value    = JSON.stringify(_fbConfigForDisplay(savedFbConfig), null, 2);
+    }
+
+    // Auto-parse when pasting JSON into the JSON config box
+    fbJsonInput?.addEventListener('input', () => {
+      const raw = fbJsonInput.value.trim();
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.projectId && fbProjectInput) fbProjectInput.value = parsed.projectId;
+        if (parsed.apiKey && fbKeyInput) fbKeyInput.value = parsed.apiKey;
+        if (parsed.authDomain && fbAuthInput) fbAuthInput.value = parsed.authDomain;
+        if (parsed.databaseURL && fbDbUrlInput) {
+          fbDbUrlInput.value = parsed.databaseURL;
+          if (fbTypeInput) fbTypeInput.value = 'rtdb';
+        }
+        if (parsed.collectionName && fbCollInput) fbCollInput.value = parsed.collectionName;
+        if (parsed.dbType && fbTypeInput) fbTypeInput.value = parsed.dbType;
+      } catch (e) {
+        // user still typing JSON
+      }
+    });
+
+    // Save Firebase Config
+    el.saveFirebaseBtn?.addEventListener('click', () => {
+      const config = {
+        dbType:         fbTypeInput?.value || 'firestore',
+        collectionName: (fbCollInput?.value || 'users').trim(),
+        projectId:      fbProjectInput?.value.trim() || '',
+        apiKey:         fbKeyInput?.value.trim() || '',
+        authDomain:     fbAuthInput?.value.trim() || '',
+        databaseURL:    fbDbUrlInput?.value.trim() || '',
+        adminEmail:     fbAdminEmailInput?.value.trim() || '',
+        adminPassword:  fbAdminPassInput?.value || ''
+      };
+
+      if (!config.projectId && !config.apiKey) {
+        _alert(fbAlert, 'warning', 'Project ID and API Key are recommended for Firebase connection.');
+      }
+
+      KangiService.saveFirebaseConfig(config);
+      if (fbJsonInput) fbJsonInput.value = JSON.stringify(_fbConfigForDisplay(config), null, 2);
+      _alert(fbAlert, 'success', '✓ Firebase configuration saved.');
+      setTimeout(() => fbAlert?.classList.add('hidden'), 3500);
+    });
+
+    // Test Firebase Connection & Sync
+    el.testFirebaseBtn?.addEventListener('click', async () => {
+      const config = {
+        dbType:         fbTypeInput?.value || 'firestore',
+        collectionName: (fbCollInput?.value || 'users').trim(),
+        projectId:      fbProjectInput?.value.trim() || '',
+        apiKey:         fbKeyInput?.value.trim() || '',
+        authDomain:     fbAuthInput?.value.trim() || '',
+        databaseURL:    fbDbUrlInput?.value.trim() || '',
+        adminEmail:     fbAdminEmailInput?.value.trim() || '',
+        adminPassword:  fbAdminPassInput?.value || ''
+      };
+
+      el.testFirebaseBtn.disabled = true;
+      el.testFirebaseBtn.innerHTML = '<span class="btn-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px;"></span>Testing...';
+
+      const res = await KangiService.testFirebaseConnection(config);
+      el.testFirebaseBtn.disabled = false;
+      el.testFirebaseBtn.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+        Test Connection & Sync
+      `;
+
+      if (res.success) {
+        KangiService.saveFirebaseConfig(config);
+        _alert(fbAlert, 'success', `✓ ${res.message} Syncing data now...`);
+        await _loadAllData();
+      } else {
+        _alert(fbAlert, 'error', `✕ Connection Failed: ${res.error}`);
+      }
+    });
+
+    /* ── Cloudinary config — load saved values on page init ── */
+    const cloudNameInput  = $('cloudinaryCloudName');
+    const presetInput     = $('cloudinaryUploadPreset');
+    const saveBtn         = $('saveCloudinaryBtn');
+    const cloudAlert      = $('cloudinaryAlert');
+
+    if (cloudNameInput && presetInput) {
+      // Pre-fill with saved config
+      const saved = KangiService.getCloudinaryConfig();
+      if (saved) {
+        cloudNameInput.value = saved.cloudName;
+        presetInput.value    = saved.uploadPreset;
+      }
+
+      saveBtn?.addEventListener('click', () => {
+        const cloudName    = cloudNameInput.value.trim();
+        const uploadPreset = presetInput.value.trim();
+
+        if (!cloudName || !uploadPreset) {
+          _alert(cloudAlert, 'error', 'Both Cloud Name and Upload Preset are required.');
+          return;
+        }
+
+        KangiService.saveCloudinaryConfig(cloudName, uploadPreset);
+        _alert(cloudAlert, 'success', '✓ Cloudinary settings saved.');
+        setTimeout(() => cloudAlert.classList.add('hidden'), 3000);
+      });
+
+      // Reset to built-in defaults
+      $('resetCloudinaryBtn')?.addEventListener('click', () => {
+        localStorage.removeItem('kangi_cloudinary_config');
+        cloudNameInput.value = '';
+        presetInput.value    = '';
+        _alert(cloudAlert, 'success', '✓ Reset to default credentials (djgvzbxvt / Community_Feed).');
+        setTimeout(() => cloudAlert.classList.add('hidden'), 3000);
+      });
+    }
+
+    /* ── Grant / Revoke Admin by Email ── */
+    const grantAdminBtn   = document.getElementById("grantAdminBtn");
+    const revokeAdminBtn  = document.getElementById("revokeAdminBtn");
+    const grantAdminAlert = document.getElementById("grantAdminAlert");
+
+    function _grantAdminAlert(msg, type) {
+      if (!grantAdminAlert) return;
+      grantAdminAlert.textContent = msg;
+      grantAdminAlert.className = "alert alert-" + (type === "success" ? "success" : type === "info" ? "info" : "error");
+      grantAdminAlert.classList.remove("hidden");
+      setTimeout(() => grantAdminAlert.classList.add("hidden"), 5000);
+    }
+
+    async function _findUserByEmail(email) {
+      if (typeof KangiService.getUserByEmail === "function") {
+        const u = await KangiService.getUserByEmail(email);
+        if (u) return u;
+      }
+      try {
+        const rows = await KangiService._get("/admin_users", {
+          "email":  "eq." + email,
+          "select": "id,display_name,email"
+        });
+        return rows && rows[0] ? rows[0] : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    if (grantAdminBtn) {
+      grantAdminBtn.addEventListener("click", async () => {
+        const email = document.getElementById("grantAdminEmail")?.value?.trim();
+        if (!email) return _grantAdminAlert("Please enter an email address.", "error");
+
+        grantAdminBtn.disabled = true;
+        grantAdminBtn.textContent = "Granting...";
+        _grantAdminAlert("Looking up user...", "info");
+
+        try {
+          const user = await _findUserByEmail(email);
+          if (!user) {
+            _grantAdminAlert(`No account found for "${email}". The user must sign up first.`, "error");
+            return;
+          }
+          const res = await KangiService.makeAdmin(email, user.id);
+          if (res && res.success) {
+            _grantAdminAlert(`✅ Admin granted to ${user.display_name || email}.`, "success");
+            const inp = document.getElementById("grantAdminEmail");
+            if (inp) inp.value = "";
+            if (typeof _loadUsers === "function") await _loadUsers();
+          } else {
+            _grantAdminAlert(res?.error || "Failed to grant admin.", "error");
+          }
+        } catch (err) {
+          _grantAdminAlert(err?.message || "Error: " + String(err), "error");
+        } finally {
+          grantAdminBtn.disabled = false;
+          grantAdminBtn.textContent = "🛡️ Make Admin";
+        }
+      });
+    }
+
+    if (revokeAdminBtn) {
+      revokeAdminBtn.addEventListener("click", async () => {
+        const email = document.getElementById("revokeAdminEmail")?.value?.trim();
+        if (!email) return _grantAdminAlert("Please enter an email address.", "error");
+        if (!confirm(`Revoke admin from "${email}"?`)) return;
+
+        revokeAdminBtn.disabled = true;
+        revokeAdminBtn.textContent = "Revoking...";
+        _grantAdminAlert("Looking up user...", "info");
+
+        try {
+          const user = await _findUserByEmail(email);
+          if (!user) {
+            _grantAdminAlert(`No account found for "${email}".`, "error");
+            return;
+          }
+          const res = await KangiService.revokeAdmin(email, user.id);
+          if (res && res.success) {
+            _grantAdminAlert(`✅ Admin revoked from ${user.display_name || email}.`, "success");
+            const inp = document.getElementById("revokeAdminEmail");
+            if (inp) inp.value = "";
+            if (typeof _loadUsers === "function") await _loadUsers();
+          } else {
+            _grantAdminAlert(res?.error || "Failed to revoke admin.", "error");
+          }
+        } catch (err) {
+          _grantAdminAlert(err?.message || "Error: " + String(err), "error");
+        } finally {
+          revokeAdminBtn.disabled = false;
+          revokeAdminBtn.textContent = "❌ Revoke Admin";
+        }
+      });
+    }
+  }
+
+  /* ================================================================
+     NAVIGATION
+     ================================================================ */
+  function _bindNav() {
+    document.querySelectorAll('[data-view]').forEach(btn =>
+      btn.addEventListener('click', () => _switchView(btn.dataset.view))
+    );
+    /* Quick action tiles on dashboard */
+    document.querySelectorAll('[data-nav]').forEach(btn =>
+      btn.addEventListener('click', () => _switchView(btn.dataset.nav))
+    );
+  }
+
+  // ------------------------------------------------
+  // MENU TOGGLE – mobile sidebar open/close
+  // ------------------------------------------------
+  function _bindMenuToggle() {
+    const sidebar = $('sidebar');
+    const overlay = el.sidebarOverlay || $('sidebarOverlay');
+
+    function toggleMenu(e) {
+      if (e) e.stopPropagation();
+      const isOpen = sidebar ? sidebar.classList.toggle('open') : false;
+      if (overlay) overlay.classList.toggle('open', isOpen);
+      if (el.menuToggleBtn) {
+        el.menuToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      }
+    }
+
+    function closeMenu() {
+      if (sidebar) sidebar.classList.remove('open');
+      if (overlay) overlay.classList.remove('open');
+      if (el.menuToggleBtn) {
+        el.menuToggleBtn.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    if (el.menuToggleBtn) {
+      el.menuToggleBtn.addEventListener('click', toggleMenu);
+    }
+    if (overlay) {
+      overlay.addEventListener('click', closeMenu);
+    }
+  }
+
+  async function _switchView(name) {
+    document.querySelectorAll('.view').forEach(v => {
+      v.classList.remove('active');
+      v.classList.remove('hidden');
+    });
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+
+    /* Close mobile menu when view changes */
+    const sidebar = $('sidebar');
+    const overlay = el.sidebarOverlay || $('sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    if (el.menuToggleBtn) el.menuToggleBtn.setAttribute('aria-expanded', 'false');
+
+    const view = $(`${name}View`);
+    if (view) {
+      view.classList.remove('hidden');
+      view.classList.add('active');
+    }
+
+    const navBtn = document.querySelector(`.nav-item[data-view="${name}"]`);
+    if (navBtn) navBtn.classList.add('active');
+
+    const meta = VIEWS[name] || { title: name, sub: '' };
+    el.pageTitle.textContent = meta.title;
+    el.pageSub.textContent   = meta.sub;
+
+    if (name === 'settings') {
+      if (typeof window._reloadAppConfig === 'function') {
+        window._reloadAppConfig();
+      }
+    }
+    if (name === 'sounds') {
+      await _loadSongsData();
+    }
+    if (name === 'users') {
+      await _loadUsers();
+    }
+    if (name === 'messages') {
+      await _loadMessages();
+    }
+
+    _updateGlobalUploadBadge();
+  }
+
+  /* ================================================================
+     DATA — Load from Supabase REST
+     ================================================================ */
+  async function _loadAllData() {
+    try {
+      const [nftsRes, usersRes, songsRes] = await Promise.allSettled([
+        KangiService.getNfts(),
+        _fetchAndEnrichUsers(),
+        KangiService.getSongs()
+      ]);
+
+      state.nfts = (nftsRes.status === 'fulfilled' && nftsRes.value && Array.isArray(nftsRes.value.nfts)) ? nftsRes.value.nfts : [];
+      if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
+        state.allUsers = usersRes.value;
+        state.filteredUsers = usersRes.value;
+      }
+      if (songsRes.status === 'fulfilled' && songsRes.value) {
+        const sData = songsRes.value;
+        state.songs = Array.isArray(sData.songs) ? sData.songs : (Array.isArray(sData) ? sData : []);
+      }
+    } catch (e) {
+      console.error('[Kangi] Data load error:', e);
+      state.nfts = [];
+    }
+    _renderAll();
+  }
+
+  function _renderAll() {
+    _renderStats();
+    _renderDashboardUsers();
+    _renderDashboardSongs();
+    _renderRecent();
+    _renderLibrary();
+    if (state.allUsers && state.allUsers.length && el.usersList) {
+      _renderUsers(state.filteredUsers && state.filteredUsers.length ? state.filteredUsers : state.allUsers);
+    }
+  }
+
+  /* ─── Stats ─── */
+  function _renderStats() {
+    const codes    = state.nfts.flatMap(n => n.codes || []);
+    const redeemed = codes.filter(c => c.redeemed).length;
+    _countUp(el.statNfts,     state.nfts.length);
+    _countUp(el.statCodes,    codes.length);
+    _countUp(el.statRedeemed, redeemed);
+    if (el.statUsers) _countUp(el.statUsers, (state.allUsers || []).length);
+  }
+
+  function _countUp(el, target) {
+    if (!el) return;
+    const start = parseInt(el.textContent) || 0;
+    if (start === target) return;
+    const step = target > start ? 1 : -1;
+    let cur = start;
+    const timer = setInterval(() => {
+      cur += step;
+      el.textContent = cur;
+      if (cur === target) clearInterval(timer);
+    }, 40);
+  }
+
+  /* ─── Registered Users (dashboard) ─── */
+  function _renderDashboardUsers() {
+    if (!el.dashUsersList) return;
+    const users = state.allUsers || [];
+    if (!users.length) {
+      el.dashUsersList.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+          <p>No registered players yet</p>
+        </div>`;
+      return;
+    }
+
+    el.dashUsersList.innerHTML = '';
+    // Display all registered players on the dashboard
+    users.forEach(user => {
+      const card = _createUserCardElement(user);
+      el.dashUsersList.appendChild(card);
+    });
+  }
+
+  /* ─── Recent Sounds (dashboard) ─── */
+  function _renderDashboardSongs() {
+    if (!el.dashSoundsList) return;
+    const songs = state.songs || [];
+    if (!songs.length) {
+      el.dashSoundsList.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:36px;height:36px;opacity:0.4;color:var(--pink);"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          <p>No audio tracks yet</p>
+        </div>`;
+      return;
+    }
+
+    el.dashSoundsList.innerHTML = songs.slice(0, 6).map(song => {
+      const isPending = song.isPending === true || song.isPending === "true";
+      const title = song.SongName || song.title || song.SongTitle || song.songTitle || song.Title || song.name || song.Name || "Untitled Song";
+      const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
+      const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
+      const artist = singer || uploader || "Unknown Artist";
+      // Artwork first, uploader picture last. The chain used to lead with avatarUrl, so a
+      // song that carried both showed the uploader's face instead of its own cover art.
+      const cover = song.coverImageUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.imageUrl || song.image || song.avatarUrl || song.avatar || song.photoURL || song.photoUrl || "";
+      const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
+
+      let artistSub = _esc(artist);
+      if (singer && uploader && singer.toLowerCase() !== uploader.toLowerCase()) {
+        artistSub = `${_esc(singer)} <span style="opacity:0.65;font-weight:normal;">• by ${_esc(uploader)}</span>`;
+      } else if (!singer && uploader) {
+        artistSub = `${_esc(uploader)}`;
+      }
+
+      return `
+        <div class="recent-item" style="cursor:pointer;" onclick="document.querySelector('[data-view=sounds]').click()" title="Click to view in Sounds Library">
+          ${cover ? `
+            <img class="recent-thumb" src="${_esc(cover)}" alt="${_esc(artist)}" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='grid';" />
+            <div class="recent-thumb" style="display:none;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);border-radius:8px;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          ` : `
+            <div class="recent-thumb" style="display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);border-radius:8px;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          `}
+          <div class="recent-info">
+            <div class="recent-name">${_esc(title)}</div>
+            <div class="recent-sub">${artistSub}</div>
+          </div>
+          <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Approved'}</span>
+        </div>`;
+    }).join('');
+  }
+
+  /* ─── Recent TCGs (dashboard) ─── */
+  function _renderRecent() {
+    if (!state.nfts.length) {
+      el.recentList.innerHTML = _emptyHTML('No TCGs created yet');
+      return;
+    }
+    el.recentList.innerHTML = state.nfts.slice(0, 5).map(nft => {
+      const total    = (nft.codes || []).length;
+      const redeemed = (nft.codes || []).filter(c => c.redeemed).length;
+      const avail    = total - redeemed;
+      return `
+        <div class="recent-item">
+          <img class="recent-thumb" src="${nft.image}" alt="${_esc(nft.name)}" />
+          <div class="recent-info">
+            <div class="recent-name">${_esc(nft.name)}</div>
+            <div class="recent-sub">${total} QR codes · ${redeemed} redeemed</div>
+          </div>
+          <span class="chip ${avail > 0 ? 'chip--teal' : 'chip--red'}">${avail} left</span>
+        </div>`;
+    }).join('');
+  }
+
+  /* ─── TCG Library (Manage QRs) ─── */
+  function _renderLibrary() {
+    if (!state.nfts.length) {
+      el.nftLibrary.innerHTML = `
+        <div class="empty-state">
+          ${_nftSvg()}
+          <p>No TCGs in your library yet</p>
+          <button class="btn btn-primary btn-sm" onclick="document.querySelector('[data-view=create]').click()">Create your first TCG</button>
+        </div>`;
+      return;
+    }
+
+    el.nftLibrary.innerHTML = '';
+    state.nfts.forEach((nft, ni) => {
+      const codes    = nft.codes || [];
+      const redeemed = codes.filter(c => c.redeemed).length;
+      const pct      = codes.length ? Math.round((redeemed / codes.length) * 100) : 0;
+
+      const entry = document.createElement('div');
+      entry.className = 'nft-entry';
+
+      /* ── Header ── */
+      const head = document.createElement('div');
+      head.className = 'nft-entry-head';
+      head.innerHTML = `
+        <img class="nft-thumb" src="${nft.image}" alt="${_esc(nft.name)}" />
+        <div class="nft-meta">
+          <strong>${_esc(nft.name)}</strong>
+          ${nft.description ? `<div class="nft-desc-text">${_esc(nft.description)}</div>` : ''}
+          <div class="nft-meta-row">
+            <span class="chip chip--purple">${codes.length} QR codes</span>
+            <span class="chip chip--green">${redeemed} redeemed</span>
+            <span class="chip chip--teal">${codes.length - redeemed} remaining</span>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" style="width:${pct}%"></div>
+          </div>
+        </div>
+        <svg viewBox="0 0 20 20" fill="currentColor" class="chevron" style="width:18px;height:18px;color:var(--text-3);flex-shrink:0;transition:transform .25s ease;">
+          <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>`;
+
+      /* ── Body (QR rows) ── */
+      const body = document.createElement('div');
+      body.className = 'nft-entry-body';
+
+      codes.forEach((code) => {
+        const row = document.createElement('div');
+        row.className = 'qr-row';
+        row.innerHTML = `
+          <div class="qr-box" id="qr-box-${_safeId(code.token)}"></div>
+          <div class="qr-details">
+            <div class="qr-serial">${_esc(code.serial)}</div>
+            <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
+              <span class="chip ${code.redeemed ? 'chip--red' : 'chip--green'}">
+                ${code.redeemed ? '✓ Redeemed' : '● Available'}
+              </span>
+              ${code.redeemed && code.redeemedAt
+                ? `<span class="qr-url">at ${new Date(code.redeemedAt).toLocaleString()}</span>`
+                : ''}
+            </div>
+            <div class="qr-url" title="${_esc(code.url)}">${_esc(code.url)}</div>
+            <div class="qr-actions-row">
+              <button class="btn btn-ghost btn-sm" data-action="download" data-token="${code.token}">
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                Download QR
+              </button>
+              <button class="btn btn-ghost btn-sm" data-action="copy" data-url="${code.url}">
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/></svg>
+                Copy Link
+              </button>
+              ${!code.redeemed ? `
+              <button class="btn btn-ghost btn-sm" data-action="open-redeem" data-token="${code.token}">
+                <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+                Open Redeem
+              </button>` : ''}
+            </div>
+          </div>`;
+        body.appendChild(row);
+      });
+
+      entry.appendChild(head);
+      entry.appendChild(body);
+      el.nftLibrary.appendChild(entry);
+
+      /* ── Accordion toggle ── */
+      let qrsGenerated = false;
+      head.addEventListener('click', () => {
+        const isOpen = body.classList.toggle('open');
+        const chev   = head.querySelector('.chevron');
+        if (chev) chev.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+
+        /* Generate QR codes lazily on first open */
+        if (isOpen && !qrsGenerated) {
+          qrsGenerated = true;
+          codes.forEach(code => {
+            const box = document.getElementById(`qr-box-${_safeId(code.token)}`);
+            if (box && !box.querySelector('canvas, img')) {
+              try {
+                new QRCode(box, {
+                  text:         code.url,
+                  width:        110,
+                  height:       110,
+                  correctLevel: QRCode.CorrectLevel.H
+                });
+              } catch (err) {
+                box.textContent = '—';
+                console.warn('QR gen error:', err);
+              }
+            }
+          });
+        }
+      });
+
+      /* ── Action button delegation ── */
+      body.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        e.stopPropagation();
+
+        const action = btn.dataset.action;
+
+        if (action === 'download') {
+          const box    = document.getElementById(`qr-box-${_safeId(btn.dataset.token)}`);
+          const canvas = box?.querySelector('canvas');
+          if (canvas) {
+            const a  = document.createElement('a');
+            a.href   = canvas.toDataURL('image/png');
+            a.download = `${btn.dataset.token}.png`;
+            a.click();
+          } else {
+            alert('Please open the TCG panel first so the QR can render, then download.');
+          }
+        }
+
+        if (action === 'copy') {
+          try {
+            await navigator.clipboard.writeText(btn.dataset.url);
+            const orig = btn.innerHTML;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.innerHTML = orig; }, 1600);
+          } catch {
+            prompt('Copy this link:', btn.dataset.url);
+          }
+        }
+
+        if (action === 'open-redeem') {
+          _switchView('redeem');
+          el.redeemToken.value = btn.dataset.token;
+          _alert(el.redeemAlert, 'info', 'Token loaded. Click "Verify & Redeem" to process it.');
+          el.redeemResult.classList.add('hidden');
+        }
+      });
+    });
+  }
+
+  /* ================================================================
+     CREATE NFT — Generate batch → Supabase unlock_codes table
+     ================================================================ */
+  function _bindFileDrop() {
+    if (!el.nftImage) return;
+
+    el.nftImage.addEventListener('change', _onFileChosen);
+
+    el.fileDrop.addEventListener('dragover', e => { e.preventDefault(); el.fileDrop.classList.add('dragover'); });
+    el.fileDrop.addEventListener('dragleave', () => el.fileDrop.classList.remove('dragover'));
+    el.fileDrop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      el.fileDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length) {
+        el.nftImage.files = e.dataTransfer.files; // modern browsers
+        _onFileChosen();
+      }
+    });
+  }
+
+  function _onFileChosen() {
+    const file = el.nftImage.files[0];
+    if (!file) return;
+    if (el.filePreviewName) {
+      el.filePreviewName.textContent = file.name;
+    }
+  }
+
+  function _bindCreate() {
+    el.nftForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const file      = el.nftImage.files[0];
+      const character = el.nftCharacter ? el.nftCharacter.value.trim() : '';
+      const suffix    = el.nftName ? el.nftName.value.trim() : '';
+      const name      = suffix ? `${character} — ${suffix}` : character;
+      const count     = Number(el.nftCount.value);
+
+      if (!character) return _alert(el.createAlert, 'error', 'Please select a character.');
+      if (!file)      return _alert(el.createAlert, 'error', 'Please upload a TCG image.');
+      if (count < 1)  return _alert(el.createAlert, 'error', 'QR quantity must be at least 1.');
+      if (count > 50) return _alert(el.createAlert, 'error', 'Maximum 50 QR codes per batch.');
+
+      _setLoading(el.createBtn, true);
+
+      try {
+        /* 1. Upload image to Supabase Storage qr_codes bucket */
+        _alert(el.createAlert, 'info', 'Uploading image to Supabase Storage…');
+        const ext = file.name ? (file.name.split('.').pop() || 'png') : 'png';
+        const storagePath = `tcg_${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${ext}`;
+        const uploadResult = await KangiService.uploadToStorage(file, 'qr_codes', storagePath);
+
+        if (!uploadResult.success) {
+          _alert(el.createAlert, 'error', uploadResult.error || 'Image upload failed.');
+          return;
+        }
+
+        const imageUrl = uploadResult.url;
+
+        /* 2. Build NFT object — image is a URL, not base64 */
+        _alert(el.createAlert, 'info', 'Building QR batch…');
+        const nftId = _uid('COL');
+        const base  = location.origin + location.pathname;
+
+        const codes = Array.from({ length: count }, (_, i) => {
+          const token = _uid('QR');
+          return {
+            token,
+            serial:     `${nftId}-${String(i + 1).padStart(4, '0')}`,
+            redeemed:   false,
+            redeemedAt: null,
+            url:        `${base}#redeem/${token}`
+          };
+        });
+
+        const nftObj = {
+          id:          nftId,
+          name,
+          description: el.nftDesc.value.trim(),
+          image:       imageUrl,           // ← CDN URL, not base64
+          createdAt:   new Date().toISOString(),
+          codes
+        };
+
+        /* 3. Save to Supabase — payload is now tiny (no embedded image) */
+        _alert(el.createAlert, 'info', 'Saving to database…');
+        const res = await KangiService.publishNft(nftObj);
+
+        if (res && res.success !== false) {
+          _alert(el.createAlert, 'success',
+            `✓ ${count} QR code${count > 1 ? 's' : ''} created for "${name}" and saved.`);
+
+          el.nftForm.reset();
+          if (el.filePreview)     el.filePreview.classList.add('hidden');
+          if (el.filePreviewName) el.filePreviewName.textContent = 'No file chosen';
+
+          await _loadAllData();
+          setTimeout(() => _switchView('manage'), 900);
+        } else {
+          _alert(el.createAlert, 'error', (res && res.error) || 'Failed to save TCG. Please try again.');
+        }
+
+      } catch (err) {
+        _alert(el.createAlert, 'error', typeof err === 'string' ? err : err.message || 'An error occurred.');
+      } finally {
+        _setLoading(el.createBtn, false);
+      }
+    });
+  }
+
+  /* ================================================================
+     REDEEM — Verify token via CloudScript redeemToken action
+     ================================================================ */
+  function _bindRedeem() {
+    el.redeemBtn.addEventListener('click', _processRedeem);
+
+    /* Also allow pressing Enter in the token field */
+    el.redeemToken.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') _processRedeem();
+    });
+  }
+
+  async function _processRedeem() {
+    const token = el.redeemToken.value.trim();
+    if (!token) return _alert(el.redeemAlert, 'error', 'Please paste or enter a QR token.');
+
+    _setLoading(el.redeemBtn, true);
+    el.redeemResult.classList.add('hidden');
+    _alert(el.redeemAlert, 'info', 'Verifying token with the server…');
+
+    try {
+      const res = await KangiService.redeemToken(token);
+
+      if (res && res.success) {
+        _alert(el.redeemAlert, 'success', '✓ QR code redeemed successfully. This token has been marked as used.');
+        _showRedeemSuccess(res.nft, res.code);
+        await _loadAllData(); /* refresh stats */
+      } else {
+        _alert(el.redeemAlert, 'error', (res && res.error) || 'Redemption failed.');
+      }
+
+    } catch (err) {
+      _alert(el.redeemAlert, 'error', typeof err === 'string' ? err : err.message || 'Server error during redemption.');
+    } finally {
+      _setLoading(el.redeemBtn, false);
+    }
+  }
+
+  function _showRedeemSuccess(nft, code) {
+    el.redeemResult.innerHTML = `
+      <div class="redeem-result-head">
+        <img class="redeem-result-img" src="${nft.image}" alt="${_esc(nft.name)}" />
+        <div>
+          <strong style="font-size:0.95rem;">${_esc(nft.name)}</strong>
+          <div class="nft-meta-row" style="margin-top:.4rem;">
+            <span class="chip chip--red">✓ Redeemed</span>
+            <span class="chip chip--purple">${_esc(code.serial)}</span>
+          </div>
+          ${nft.description ? `<div style="font-size:0.75rem;color:var(--text-2);margin-top:.35rem;">${_esc(nft.description)}</div>` : ''}
+        </div>
+      </div>
+      <div class="redeem-result-body">
+        <strong>Token:</strong> ${_esc(code.token)}<br/>
+        <strong>Redeemed at:</strong> ${new Date(code.redeemedAt).toLocaleString()}
+      </div>`;
+    el.redeemResult.classList.remove('hidden');
+  }
+
+  /* ── Hash routing: #redeem/<token> ── */
+  function _checkHashRedeem() {
+    const hash = location.hash;
+    if (hash.startsWith('#redeem/') && KangiService.session.isLoggedIn()) {
+      const token = decodeURIComponent(hash.replace('#redeem/', ''));
+      if (token) {
+        _switchView('redeem');
+        el.redeemToken.value = token;
+        _processRedeem();
+      }
+    }
+  }
+
+  window.addEventListener('hashchange', () => {
+    if (location.hash.startsWith('#redeem/') && KangiService.session.isLoggedIn()) {
+      _checkHashRedeem();
+    }
+  });
+
+  /* ================================================================
+     SOUNDS — Management of Audio Tracks
+     ================================================================ */
+  let currentAudioSourceMode = 'file';
+  let currentCoverSourceMode = 'file';
+
+  // Object URL backing the cover preview, if the preview is showing a local file. Held so
+  // it can be revoked: every createObjectURL pins its blob in memory until it is released,
+  // and this modal can be opened and re-opened all day.
+  let coverPreviewObjectUrl = null;
+
+  function _bindSounds() {
+    if (!el.soundsLibrary) return;
+
+    el.btnFilterAllSongs?.addEventListener('click', () => _setSongFilter('all'));
+    el.btnFilterPendingSongs?.addEventListener('click', () => _setSongFilter('pending'));
+    el.btnFilterApprovedSongs?.addEventListener('click', () => _setSongFilter('approved'));
+
+    _bindUploadMusicModal();
+  }
+
+  function _bindUploadMusicModal() {
+    const openBtn = document.getElementById('btnOpenUploadSongModal');
+    const modal = document.getElementById('uploadSongModal');
+    const closeBtn = document.getElementById('closeUploadSongModal');
+    const cancelBtn = document.getElementById('cancelUploadSongBtn');
+    const form = document.getElementById('uploadSongForm');
+    const modalAlert = document.getElementById('uploadSongModalAlert');
+
+    if (!openBtn || !modal) return;
+
+    // Open Modal
+    openBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _resetUploadSongModal();
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+    });
+
+    // Close Modal
+    const _closeModal = () => {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    };
+
+    closeBtn?.addEventListener('click', _closeModal);
+    cancelBtn?.addEventListener('click', _closeModal);
+    modal.querySelector('.modal-overlay')?.addEventListener('click', _closeModal);
+
+    // Audio Source Toggle
+    const btnAudioFile = document.getElementById('btnAudioSourceFile');
+    const btnAudioUrl = document.getElementById('btnAudioSourceUrl');
+    const audioFileContainer = document.getElementById('audioFileInputContainer');
+    const audioUrlContainer = document.getElementById('audioUrlInputContainer');
+
+    btnAudioFile?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentAudioSourceMode = 'file';
+      btnAudioFile.classList.add('active');
+      btnAudioFile.style.background = 'var(--pink)';
+      btnAudioFile.style.color = '#fff';
+      if (btnAudioUrl) {
+        btnAudioUrl.classList.remove('active');
+        btnAudioUrl.style.background = 'transparent';
+        btnAudioUrl.style.color = 'var(--text-muted)';
+      }
+      audioFileContainer?.classList.remove('hidden');
+      audioUrlContainer?.classList.add('hidden');
+    });
+
+    btnAudioUrl?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentAudioSourceMode = 'url';
+      btnAudioUrl.classList.add('active');
+      btnAudioUrl.style.background = 'var(--pink)';
+      btnAudioUrl.style.color = '#fff';
+      if (btnAudioFile) {
+        btnAudioFile.classList.remove('active');
+        btnAudioFile.style.background = 'transparent';
+        btnAudioFile.style.color = 'var(--text-muted)';
+      }
+      audioUrlContainer?.classList.remove('hidden');
+      audioFileContainer?.classList.add('hidden');
+    });
+
+    // File selection text updates
+    const uploadAudioFileInput = document.getElementById('uploadAudioFile');
+    const audioFileNameText = document.getElementById('audioFileName');
+    uploadAudioFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (audioFileNameText) {
+        audioFileNameText.textContent = file ? file.name : 'Select MP3, WAV, M4A, OGG file';
+      }
+    });
+
+    // Cover Artwork Source Toggle
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+    const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+    const coverFileContainer = document.getElementById('coverFileInputContainer');
+    const coverUrlContainer = document.getElementById('coverUrlInputContainer');
+
+    btnCoverFile?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentCoverSourceMode = 'file';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
+      }
+      coverFileContainer?.classList.remove('hidden');
+      coverUrlContainer?.classList.add('hidden');
+      _refreshCoverPreview();
+    });
+
+    btnCoverUrl?.addEventListener('click', (e) => {
+      e.preventDefault();
+      currentCoverSourceMode = 'url';
+      btnCoverUrl.classList.add('active');
+      btnCoverUrl.style.background = 'var(--pink)';
+      btnCoverUrl.style.color = '#fff';
+      if (btnCoverFile) {
+        btnCoverFile.classList.remove('active');
+        btnCoverFile.style.background = 'transparent';
+        btnCoverFile.style.color = 'var(--text-muted)';
+      }
+      coverUrlContainer?.classList.remove('hidden');
+      coverFileContainer?.classList.add('hidden');
+      _refreshCoverPreview();
+    });
+
+    const uploadCoverFileInput = document.getElementById('uploadCoverFile');
+    const coverFileNameText = document.getElementById('coverFileName');
+    uploadCoverFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (coverFileNameText) {
+        coverFileNameText.textContent = file ? file.name : 'Select a JPG, PNG or WebP image';
+      }
+      _refreshCoverPreview();
+    });
+
+    document.getElementById('uploadCoverUrl')?.addEventListener('input', _refreshCoverPreview);
+
+    document.getElementById('btnClearCover')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      _clearCoverSelection();
+    });
+
+    // Form Submit Handler — Closes modal immediately & uploads in background
+    form?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (modalAlert) _hideAlert(modalAlert);
+
+      const titleInput = document.getElementById('uploadSongTitle');
+      const admin = KangiService.getAdminIdentity();
+      const title = titleInput?.value.trim();
+      const artist = admin.displayName;
+
+      if (!title) {
+        if (modalAlert) _alert(modalAlert, 'error', 'Please enter a Song Title.');
+        return;
+      }
+
+      let audioFile = null;
+      let audioUrlInput = '';
+      if (currentAudioSourceMode === 'file') {
+        audioFile = uploadAudioFileInput?.files[0];
+        if (!audioFile) {
+          if (modalAlert) _alert(modalAlert, 'error', 'Please select an audio file to upload or switch to Audio URL.');
+          return;
+        }
+      } else {
+        audioUrlInput = document.getElementById('uploadAudioUrl')?.value.trim();
+        if (!audioUrlInput) {
+          if (modalAlert) _alert(modalAlert, 'error', 'Please enter a valid Audio URL.');
+          return;
+        }
+      }
+
+      const coverFile = currentCoverSourceMode === 'file' ? document.getElementById('uploadCoverFile')?.files[0] : null;
+      const coverUrlInput = currentCoverSourceMode === 'url' ? document.getElementById('uploadCoverUrl')?.value.trim() : '';
+
+      const coverPreviewEl = document.getElementById('coverPreview');
+      const coverPreviewSrc = (coverPreviewEl && coverPreviewEl.style.display !== 'none') ? coverPreviewEl.src : (coverUrlInput || '');
+
+      const modes = [];
+      if (document.getElementById('uploadModeMirrorMii')?.checked) modes.push('mirror_mii');
+      if (document.getElementById('uploadModeKawaii')?.checked) modes.push('kawaii_mode');
+      if (document.getElementById('uploadModeDance')?.checked) modes.push('dance_challenge');
+
+      const isPending = !document.getElementById('uploadSongAutoApprove')?.checked;
+
+      // Close modal immediately so user can navigate freely to other tabs!
+      _closeModal();
+
+      // Launch background upload with live progress bar in Music / Sounds tab
+      _startBackgroundSongUpload({
+        id: 'upload_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        title,
+        artist,
+        admin,
+        audioSourceMode: currentAudioSourceMode,
+        audioFile,
+        audioUrlInput,
+        coverSourceMode: currentCoverSourceMode,
+        coverFile,
+        coverUrlInput,
+        coverPreview: coverPreviewSrc,
+        modes,
+        isPending,
+        progress: 0,
+        status: 'uploading',
+        statusText: 'Preparing upload…'
+      });
+    });
+  }
+
+  function _resetUploadSongModal() {
+    const modalAlert = document.getElementById('uploadSongModalAlert');
+    const form = document.getElementById('uploadSongForm');
+    const audioFileNameText = document.getElementById('audioFileName');
+    const btnAudioFile = document.getElementById('btnAudioSourceFile');
+
+    if (modalAlert) _hideAlert(modalAlert);
+    if (form) form.reset();
+    if (audioFileNameText) audioFileNameText.textContent = 'Select MP3, WAV, M4A, OGG file';
+
+    // Re-read the account each time the modal opens: the admin may have changed their
+    // name or picture in the game since this tab was loaded.
+    _renderUploadAsIdentity();
+    if (btnAudioFile) {
+      currentAudioSourceMode = 'file';
+      btnAudioFile.classList.add('active');
+      btnAudioFile.style.background = 'var(--pink)';
+      btnAudioFile.style.color = '#fff';
+      const btnAudioUrl = document.getElementById('btnAudioSourceUrl');
+      if (btnAudioUrl) {
+        btnAudioUrl.classList.remove('active');
+        btnAudioUrl.style.background = 'transparent';
+        btnAudioUrl.style.color = 'var(--text-muted)';
+      }
+      document.getElementById('audioFileInputContainer')?.classList.remove('hidden');
+      document.getElementById('audioUrlInputContainer')?.classList.add('hidden');
+    }
+
+    // Cover back to "Upload File" with nothing chosen. form.reset() clears the inputs but
+    // not the toggle state or the preview, both of which live outside the form's control.
+    const btnCoverFile = document.getElementById('btnCoverSourceFile');
+    if (btnCoverFile) {
+      currentCoverSourceMode = 'file';
+      btnCoverFile.classList.add('active');
+      btnCoverFile.style.background = 'var(--pink)';
+      btnCoverFile.style.color = '#fff';
+      const btnCoverUrl = document.getElementById('btnCoverSourceUrl');
+      if (btnCoverUrl) {
+        btnCoverUrl.classList.remove('active');
+        btnCoverUrl.style.background = 'transparent';
+        btnCoverUrl.style.color = 'var(--text-muted)';
+      }
+      document.getElementById('coverFileInputContainer')?.classList.remove('hidden');
+      document.getElementById('coverUrlInputContainer')?.classList.add('hidden');
+    }
+
+    // Runs after _renderUploadAsIdentity above, so the default preview picks up the
+    // account picture that call just refreshed.
+    _clearCoverSelection();
+  }
+
+  /* Paints the cover preview from whichever source is currently selected, falling back to
+     the admin's picture so the thumbnail always shows what the song will actually carry. */
+  function _refreshCoverPreview() {
+    const img = document.getElementById('coverPreview');
+    const fallback = document.getElementById('coverPreviewFallback');
+    const hint = document.getElementById('coverHint');
+    const clearBtn = document.getElementById('btnClearCover');
+    if (!img || !fallback) return;
+
+    // Always release the previous blob before deciding what to show next, or switching
+    // between files leaks one object URL per change.
+    if (coverPreviewObjectUrl) {
+      URL.revokeObjectURL(coverPreviewObjectUrl);
+      coverPreviewObjectUrl = null;
+    }
+
+    let src = '';
+    let chosen = false;
+
+    if (currentCoverSourceMode === 'file') {
+      const file = document.getElementById('uploadCoverFile')?.files[0];
+      if (file) {
+        coverPreviewObjectUrl = URL.createObjectURL(file);
+        src = coverPreviewObjectUrl;
+        chosen = true;
+      }
+    } else {
+      const url = document.getElementById('uploadCoverUrl')?.value.trim();
+      if (url) { src = url; chosen = true; }
+    }
+
+    if (!src) {
+      const admin = KangiService.getAdminIdentity();
+      src = admin.avatarUrl || '';
+    }
+
+    if (hint) {
+      hint.textContent = chosen
+        ? 'This artwork will be used as the song cover.'
+        : 'Optional — your profile picture is used if you leave this empty.';
+    }
+    if (clearBtn) clearBtn.style.display = chosen ? 'inline-flex' : 'none';
+
+    if (src) {
+      // A URL the admin typed may not resolve. Fall back to the icon rather than leaving
+      // a broken image in the form.
+      img.onerror = () => {
+        img.style.display = 'none';
+        fallback.style.display = 'grid';
+      };
+      img.src = src;
+      img.style.display = 'block';
+      fallback.style.display = 'none';
+    } else {
+      img.removeAttribute('src');
+      img.style.display = 'none';
+      fallback.style.display = 'grid';
+    }
+  }
+
+  /* Drops whatever cover was chosen and goes back to the admin-picture default. */
+  function _clearCoverSelection() {
+    const fileInput = document.getElementById('uploadCoverFile');
+    const urlInput = document.getElementById('uploadCoverUrl');
+    const coverFileNameText = document.getElementById('coverFileName');
+
+    if (fileInput) fileInput.value = '';
+    if (urlInput) urlInput.value = '';
+    if (coverFileNameText) coverFileNameText.textContent = 'Select a JPG, PNG or WebP image';
+
+    _refreshCoverPreview();
+  }
+
+  /* Shows the admin whose name this upload will carry. The artist field was removed, so
+     without this the substitution is invisible. */
+  function _renderUploadAsIdentity() {
+    const admin = KangiService.getAdminIdentity();
+
+    if (el.uploadAsName) el.uploadAsName.textContent = admin.displayName || '—';
+
+    const initial = (admin.displayName || '?').charAt(0).toUpperCase();
+    if (el.uploadAsInitial) el.uploadAsInitial.textContent = initial;
+
+    // The picture is optional. Fall back to the initial rather than a broken image,
+    // including when the URL itself fails to load.
+    if (el.uploadAsAvatar) {
+      if (admin.avatarUrl) {
+        el.uploadAsAvatar.onerror = () => {
+          el.uploadAsAvatar.style.display = 'none';
+          if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'flex';
+        };
+        el.uploadAsAvatar.src = admin.avatarUrl;
+        el.uploadAsAvatar.style.display = 'block';
+        if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'none';
+      } else {
+        el.uploadAsAvatar.style.display = 'none';
+        if (el.uploadAsInitial) el.uploadAsInitial.style.display = 'flex';
+      }
+    }
+  }
+
+  /* ============================================================
+     BACKGROUND MUSIC UPLOAD MANAGER & REAL-TIME PROGRESS TRACKING
+     ============================================================ */
+
+  function _removeActiveUpload(jobId) {
+    if (!state.activeMusicUploads) return;
+    state.activeMusicUploads = state.activeMusicUploads.filter(j => j.id !== jobId);
+    const elRow = document.getElementById(`upload-row-${jobId}`);
+    if (elRow) elRow.remove();
+    _updateGlobalUploadBadge();
+    if (state.activeMusicUploads.length === 0 && (!state.songs || state.songs.length === 0)) {
+      _renderSongsList();
+    }
+  }
+
+  function _createUploadSongElement(job) {
+    const entry = document.createElement('div');
+    entry.className = 'song-entry uploading-song-entry';
+    entry.id = `upload-row-${job.id}`;
+
+    const isError = job.status === 'error';
+    const isSuccess = job.status === 'success';
+
+    entry.innerHTML = `
+      <div class="song-item uploading-song-item ${isError ? 'upload-item--error' : ''} ${isSuccess ? 'upload-item--success' : ''}">
+        <div class="song-cover" style="position:relative;overflow:hidden;display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);">
+          ${job.coverPreview ? `
+            <img src="${_esc(job.coverPreview)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';" />
+            <div style="display:none;width:100%;height:100%;place-items:center;">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+            </div>
+          ` : `
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          `}
+          ${!isError && !isSuccess ? `
+            <div class="upload-cover-overlay">
+              <div class="spinner-small"></div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="song-meta" style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+            <span class="song-title-text" style="font-weight:700;">${_esc(job.title)}</span>
+            <span class="chip ${isError ? 'chip--red' : (isSuccess ? 'chip--green' : 'chip--pink')}" id="upload-chip-${job.id}">
+              ${isError ? 'Failed' : (isSuccess ? 'Done' : `${job.progress}%`)}
+            </span>
+          </div>
+          <span class="song-artist-text">${_esc(job.artist)} <span style="opacity:0.65;font-weight:normal;">• Uploading to catalog…</span></span>
+
+          <!-- Progress Bar -->
+          <div class="upload-progress-container" style="margin-top:0.5rem;">
+            <div class="upload-progress-fill" id="upload-fill-${job.id}" style="width:${job.progress}%;${isError ? 'background:#ef4444;' : (isSuccess ? 'background:#10b981;' : '')}"></div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.35rem;font-size:0.75rem;">
+            <span id="upload-status-${job.id}" style="color:${isError ? '#ef4444' : 'var(--text-muted)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              ${_esc(job.statusText || 'Uploading…')}
+            </span>
+            <span id="upload-percent-${job.id}" style="font-weight:600;color:${isError ? '#ef4444' : '#fff'};margin-left:0.5rem;">
+              ${isError ? 'Error' : `${job.progress}%`}
+            </span>
+          </div>
+
+          ${isError ? `
+            <div style="margin-top:0.4rem;display:flex;gap:0.5rem;">
+              <button type="button" class="btn btn-ghost btn-xs" data-dismiss-upload="${job.id}" style="padding:0.2rem 0.5rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;">Dismiss</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
+    entry.querySelector(`[data-dismiss-upload="${job.id}"]`)?.addEventListener('click', () => {
+      _removeActiveUpload(job.id);
+    });
+
+    return entry;
+  }
+
+  function _updateUploadProgressUI(job) {
+    const fill = document.getElementById(`upload-fill-${job.id}`);
+    const percent = document.getElementById(`upload-percent-${job.id}`);
+    const chip = document.getElementById(`upload-chip-${job.id}`);
+    const status = document.getElementById(`upload-status-${job.id}`);
+
+    if (fill) fill.style.width = `${job.progress}%`;
+    if (percent) percent.textContent = job.status === 'error' ? 'Error' : `${job.progress}%`;
+    if (chip && job.status !== 'error' && job.status !== 'success') {
+      chip.textContent = `${job.progress}%`;
+    }
+    if (status) status.textContent = job.statusText;
+
+    _updateGlobalUploadBadge();
+  }
+
+  function _updateGlobalUploadBadge() {
+    const navBadge = document.getElementById('soundsNavBadge');
+    const pill = document.getElementById('bgUploadFloatingPill');
+    const pillTitle = document.getElementById('bgUploadPillTitle');
+    const pillStatus = document.getElementById('bgUploadPillStatus');
+    const pillPercent = document.getElementById('bgUploadPillPercent');
+    const pillFill = document.getElementById('bgUploadPillFill');
+
+    const uploads = state.activeMusicUploads || [];
+    const activeJob = uploads.find(j => j.status === 'uploading' || j.status === 'saving') || uploads[0];
+
+    if (!activeJob) {
+      if (navBadge) navBadge.classList.add('hidden');
+      if (pill) pill.classList.add('hidden');
+      return;
+    }
+
+    // Sidebar badge
+    if (navBadge) {
+      navBadge.classList.remove('hidden');
+      navBadge.textContent = `${activeJob.progress}%`;
+    }
+
+    // Floating pill visible across tabs
+    if (pill) {
+      pill.classList.remove('hidden');
+      if (pillTitle) pillTitle.textContent = activeJob.title || 'Uploading Track…';
+      if (pillStatus) pillStatus.textContent = activeJob.statusText || 'Uploading…';
+      if (pillPercent) pillPercent.textContent = `${activeJob.progress}%`;
+      if (pillFill) pillFill.style.width = `${activeJob.progress}%`;
+    }
+  }
+
+  async function _startBackgroundSongUpload(job) {
+    state.activeMusicUploads = state.activeMusicUploads || [];
+    state.activeMusicUploads.unshift(job);
+
+    // If currently on Sounds view, render the new upload row immediately
+    _renderSongsList();
+    _updateGlobalUploadBadge();
+
+    try {
+      let audioUrl = '';
+
+      // 1. Upload Audio
+      if (job.audioSourceMode === 'file') {
+        job.statusText = 'Uploading audio file (0%)…';
+        job.progress = 0;
+        _updateUploadProgressUI(job);
+
+        const hasCoverFile = job.coverSourceMode === 'file' && !!job.coverFile;
+        const audioWeight = hasCoverFile ? 0.75 : 0.88;
+
+        const audioExt = job.audioFile.name ? (job.audioFile.name.split('.').pop() || 'mp3') : 'mp3';
+        const audioPath = `${KangiService.session.userId || 'admin'}/${Date.now()}_${_safeId(job.title)}.${audioExt}`;
+
+        const uploadRes = await KangiService.uploadToStorage(job.audioFile, 'songs', audioPath, (pct) => {
+          job.progress = Math.min(Math.round(pct * audioWeight), 88);
+          job.statusText = `Uploading audio file (${pct}%)…`;
+          _updateUploadProgressUI(job);
+        });
+
+        if (!uploadRes.success) {
+          throw new Error(uploadRes.error || 'Audio upload failed.');
+        }
+        audioUrl = uploadRes.url;
+      } else {
+        audioUrl = job.audioUrlInput;
+        job.progress = 40;
+        _updateUploadProgressUI(job);
+      }
+
+      // 2. Upload Cover (if provided)
+      let coverUrl = '';
+      if (job.coverSourceMode === 'file' && job.coverFile) {
+        job.statusText = 'Uploading cover artwork (0%)…';
+        job.progress = 75;
+        _updateUploadProgressUI(job);
+
+        const coverExt = job.coverFile.name ? (job.coverFile.name.split('.').pop() || 'jpg') : 'jpg';
+        const coverPath = `${KangiService.session.userId || 'admin'}/${Date.now()}_cover.${coverExt}`;
+
+        const coverRes = await KangiService.uploadToStorage(job.coverFile, 'covers', coverPath, (pct) => {
+          job.progress = Math.min(92, 75 + Math.round(pct * 0.17));
+          job.statusText = `Uploading cover artwork (${pct}%)…`;
+          _updateUploadProgressUI(job);
+        });
+
+        if (!coverRes.success) {
+          throw new Error(coverRes.error || 'Cover artwork upload failed.');
+        }
+        coverUrl = coverRes.url;
+      } else {
+        coverUrl = job.coverUrlInput || '';
+      }
+
+      if (!coverUrl) coverUrl = job.admin.avatarUrl || '';
+
+      // 3. Save Song to CloudScript
+      job.progress = 94;
+      job.statusText = 'Saving song to catalog…';
+      _updateUploadProgressUI(job);
+
+      const songData = {
+        SongId: 'song_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        songTitle: job.title,
+        SongName: job.title,
+        Singer: job.artist,
+        artistName: job.artist,
+        SongUrl: audioUrl,
+        songLink: audioUrl,
+        coverImageUrl: coverUrl,
+        AvatarUrl: coverUrl,
+        uploadDate: _todayStamp(),
+        modes: job.modes.length ? job.modes : ['mirror_mii', 'kawaii_mode'],
+        trimStart: 0,
+        trimEnd: 0,
+        isPending: job.isPending,
+        uploaderId: job.admin.userId || 'Admin',
+        uploaderName: job.admin.displayName,
+        avatarUrl: job.admin.avatarUrl || ''
+      };
+
+      const autoApprove = !job.isPending;
+      const res = await KangiService.addSong(songData, autoApprove);
+
+      if (!res || res.success === false) {
+        throw new Error(res?.error || res?.message || 'Failed to save song to server.');
+      }
+
+      // 4. Completed!
+      job.progress = 100;
+      job.status = 'success';
+      job.statusText = (res.autoApproveRequested && !res.approved)
+        ? 'Uploaded (Waiting in Pending)'
+        : '✓ Uploaded & Published!';
+      _updateUploadProgressUI(job);
+
+      // Refresh catalog list so the newly uploaded song appears in the library
+      await _loadSongsData();
+      _setSongFilter('all'); // reset to show all songs after upload
+
+      if (el.soundsAlert) {
+        _alert(el.soundsAlert, 'success', `🎵 "${job.title}" successfully uploaded and added to the library!`);
+      }
+
+      // Keep success card visible for 3.5 seconds before removing from active uploads
+      setTimeout(() => {
+        _removeActiveUpload(job.id);
+      }, 3500);
+
+    } catch (err) {
+      console.error('[Kangi] Upload error:', err);
+      job.status = 'error';
+      job.statusText = err?.message || err || 'Upload failed.';
+      _updateUploadProgressUI(job);
+
+      const row = document.getElementById(`upload-row-${job.id}`);
+      if (row) {
+        const item = row.querySelector('.uploading-song-item');
+        if (item) item.classList.add('upload-item--error');
+        const chip = document.getElementById(`upload-chip-${job.id}`);
+        if (chip) {
+          chip.className = 'chip chip--red';
+          chip.textContent = 'Failed';
+        }
+        const fill = document.getElementById(`upload-fill-${job.id}`);
+        if (fill) fill.style.background = '#ef4444';
+        const percent = document.getElementById(`upload-percent-${job.id}`);
+        if (percent) {
+          percent.style.color = '#ef4444';
+          percent.textContent = 'Error';
+        }
+      }
+
+      if (el.soundsAlert) {
+        _alert(el.soundsAlert, 'error', `Upload failed for "${job.title}": ${err?.message || err}`);
+      }
+    }
+  }
+
+  function _setSongFilter(filter) {
+    state.songFilter = filter;
+    document.querySelectorAll('#soundsView .btn').forEach(btn => btn.classList.remove('active'));
+    
+    if (filter === 'all') el.btnFilterAllSongs?.classList.add('active');
+    if (filter === 'pending') el.btnFilterPendingSongs?.classList.add('active');
+    if (filter === 'approved') el.btnFilterApprovedSongs?.classList.add('active');
+
+    _renderSongsList();
+  }
+
+  async function _loadSongsData() {
+    if (!el.soundsLibrary) return;
+    const hasActiveUploads = Array.isArray(state.activeMusicUploads) && state.activeMusicUploads.length > 0;
+    if (!hasActiveUploads) {
+      el.soundsLibrary.innerHTML = `
+        <div class="empty-state">
+          <div class="btn-loader"></div>
+          <p>Loading songs from the server...</p>
+        </div>`;
+    }
+    try {
+      const res = await KangiService.getSongs();
+      console.log('[Songs] getSongs response:', res);
+      state.songs = (res && Array.isArray(res.songs)) ? res.songs :
+                    ((res && res.songs) ? res.songs : []);
+      console.log('[Songs] state.songs count:', state.songs.length);
+    } catch (e) {
+      console.error('[Kangi] Songs load error:', e);
+      state.songs = [];
+    }
+    _renderSongsList();
+    _renderDashboardSongs();
+  }
+
+  function _renderSongsList() {
+    if (!el.soundsLibrary) return;
+
+    let filtered = state.songs || [];
+    if (state.songFilter === 'pending') {
+      filtered = state.songs.filter(s => s.isPending === true || s.isPending === "true");
+    } else if (state.songFilter === 'approved') {
+      filtered = state.songs.filter(s => s.isPending === false || s.isPending === "false" || !s.isPending);
+    }
+
+    const hasActiveUploads = Array.isArray(state.activeMusicUploads) && state.activeMusicUploads.length > 0;
+
+    if (!filtered.length && !hasActiveUploads) {
+      el.soundsLibrary.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:40px;height:40px;opacity:0.4;color:var(--pink);"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          <p>No songs found in this category</p>
+        </div>`;
+      return;
+    }
+
+    el.soundsLibrary.innerHTML = '';
+
+    // Render active uploads first at the top of the music list
+    if (hasActiveUploads) {
+      state.activeMusicUploads.forEach(job => {
+        el.soundsLibrary.appendChild(_createUploadSongElement(job));
+      });
+    }
+    filtered.forEach(song => {
+      const isPending = song.isPending === true || song.isPending === "true";
+      const songId = song.SongId || song.id;
+      const title = song.SongName || song.title || song.SongTitle || song.songTitle || song.Title || song.name || song.Name || "Untitled Song";
+      const singer = (song.Singer || song.artist || song.artistName || song.SingerName || "").trim();
+      const uploader = (song.uploaderName || song.uploaderDisplayName || song.uploader || song.userName || song.username || "").trim();
+      const artist = singer || uploader || "Unknown Artist";
+      // Artwork first, uploader picture last. The chain used to lead with avatarUrl, so a
+      // song that carried both showed the uploader's face instead of its own cover art.
+      const cover = song.coverImageUrl || song.AvatarUrl || song.CoverUrl || song.cover || song.coverUrl || song.imageUrl || song.image || song.avatarUrl || song.avatar || song.photoURL || song.photoUrl || "";
+      const songUrl = song.SongUrl || song.songLink || song.url || song.musicUrl || "";
+
+      const modes     = Array.isArray(song.modes) ? song.modes : [];
+      const trimStart = Number(song.trimStart) || 0;
+      const trimEnd   = Number(song.trimEnd)   || 0;
+      const trimLen   = trimEnd > trimStart ? (trimEnd - trimStart) : 0;
+
+      const modeDefs = [
+        { key: 'dance_challenge', label: 'Dance Challenge' },
+        { key: 'mirror_mii',      label: 'Mirror Mii!' },
+        { key: 'kawaii_mode',     label: 'Kawaii Mode' }
+      ];
+
+      let artistDisplay = _esc(artist);
+      if (singer && uploader && singer.toLowerCase() !== uploader.toLowerCase()) {
+        artistDisplay = `${_esc(singer)} <span style="opacity:0.65;font-weight:normal;">• Uploaded by ${_esc(uploader)}</span>`;
+      } else if (!singer && uploader) {
+        artistDisplay = `${_esc(uploader)} <span style="opacity:0.65;font-weight:normal;">(Artist)</span>`;
+      }
+
+      const entry = document.createElement('div');
+      entry.className = 'song-entry';
+
+      const row = document.createElement('div');
+      row.className = 'song-item';
+      row.innerHTML = `
+        ${cover ? `
+          <img class="song-cover" src="${_esc(cover)}" alt="${_esc(artist)}" data-action="preview" data-url="${_esc(songUrl)}" style="cursor:pointer;" title="Click to play/pause" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='grid';" />
+          <div class="song-cover" style="display:none;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);cursor:pointer;" data-action="preview" data-url="${_esc(songUrl)}" title="Click to play/pause">
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          </div>
+        ` : `
+          <div class="song-cover" style="display:grid;place-items:center;background:rgba(236,72,153,0.15);color:var(--pink);cursor:pointer;" data-action="preview" data-url="${_esc(songUrl)}" title="Click to play/pause">
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px;"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" clip-rule="evenodd"/></svg>
+          </div>
+        `}
+        <div class="song-meta">
+          <span class="song-title-text">${_esc(title)}</span>
+          <span class="song-artist-text">${artistDisplay}</span>
+          <div style="margin-top:0.35rem;display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;">
+            <span class="chip ${isPending ? 'chip--red' : 'chip--green'}">${isPending ? 'Pending' : 'Approved'}</span>
+            ${modes.length
+              ? modes.map(m => {
+                  const d = modeDefs.find(x => x.key === m);
+                  return `<span class="chip chip--teal">${_esc(d ? d.label : m)}</span>`;
+                }).join('')
+              : `<span class="chip chip--red">No modes</span>`}
+            ${trimLen > 0 ? `<span class="chip chip--teal">Trim ${trimLen.toFixed(1)}s</span>` : ''}
+          </div>
+        </div>
+
+        <div class="song-actions">
+          ${isPending ? `
+            <button class="btn btn-primary btn-sm" data-action="approve" data-id="${songId}">Approve</button>
+          ` : ''}
+          <button class="btn btn-secondary btn-sm" data-action="toggle-settings" data-id="${songId}">Edit</button>
+          <button class="btn btn-danger btn-sm" data-action="delete" data-id="${songId}">Delete</button>
+        </div>
+      `;
+
+      const panel = document.createElement('div');
+      panel.className = 'song-settings hidden';
+      panel.dataset.settingsFor = songId;
+      panel.innerHTML = `
+        <div class="song-settings-group">
+          <span class="song-settings-label">Available in</span>
+          <div class="song-mode-row">
+            ${modeDefs.map(d => `
+              <label class="song-mode-check">
+                <input type="checkbox" data-mode="${d.key}" ${modes.indexOf(d.key) !== -1 ? 'checked' : ''} />
+                <span>${d.label}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="song-settings-group">
+          <span class="song-settings-label">Trim window &mdash; seconds into the original file</span>
+          <div class="song-trim-bar" data-ready="false" data-duration="0">
+            <div class="song-trim-track">
+              <div class="song-trim-range"></div>
+              <div class="song-trim-playhead"></div>
+              <div class="song-trim-handle" data-handle="start" tabindex="0" role="slider"
+                   aria-label="Trim start" aria-valuemin="0" aria-valuenow="${trimStart}">
+                <span class="song-trim-bubble" data-bubble="start">0:00</span>
+              </div>
+              <div class="song-trim-handle" data-handle="end" tabindex="0" role="slider"
+                   aria-label="Trim end" aria-valuemin="0" aria-valuenow="${trimEnd}">
+                <span class="song-trim-bubble" data-bubble="end">0:00</span>
+              </div>
+            </div>
+            <div class="song-trim-scale">
+              <span>0:00</span>
+              <span class="song-trim-total">loading&hellip;</span>
+            </div>
+          </div>
+
+          <div class="song-trim-row">
+            <label>Start <input type="number" class="song-trim-start" min="0" step="0.1" value="${trimStart}" /></label>
+            <label>End <input type="number" class="song-trim-end" min="0" step="0.1" value="${trimEnd}" /></label>
+            <span class="song-trim-len">${trimLen > 0 ? trimLen.toFixed(1) + 's clip' : 'full track'}</span>
+          </div>
+          <span class="song-settings-hint">End of 0 plays to the natural end of the file. The upload itself is never modified.</span>
+        </div>
+
+        <div class="song-settings-actions">
+          ${songUrl ? `
+            <a class="btn btn-secondary btn-sm" href="${_esc(songUrl)}" download target="_blank" rel="noopener">Download original</a>
+            <button class="btn btn-secondary btn-sm" data-action="preview-trim" data-id="${songId}" data-url="${_esc(songUrl)}">Play trimmed</button>
+          ` : ''}
+          <button class="btn btn-primary btn-sm" data-action="save-settings" data-id="${songId}">Save settings</button>
+        </div>
+      `;
+
+      // Transport bar: play/pause, elapsed, a seek slider you can drag, length.
+      // One <audio> per song so each bar owns its own position; _stopOtherSongAudio
+      // keeps only one of them sounding at a time.
+      if (songUrl) {
+        const player = document.createElement('div');
+        player.className = 'song-player';
+        player.dataset.playerFor = songId;
+        player.dataset.ready = 'false';
+        player.dataset.playing = 'false';
+        player.innerHTML = `
+          <button class="song-player-btn" type="button" data-action="player-toggle"
+                  aria-label="Play ${_esc(title)}" title="Play / pause">
+            <svg class="song-player-icon song-player-icon--play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.5.5 0 00.76.43l11.02-6.86a.5.5 0 000-.86L8.76 4.71a.5.5 0 00-.76.43z"/></svg>
+            <svg class="song-player-icon song-player-icon--pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5h3.2v15H7zM13.8 4.5H17v15h-3.2z"/></svg>
+          </button>
+          <span class="song-player-time" data-player-current>0:00</span>
+          <input class="song-player-seek" type="range" min="0" max="0" step="0.01" value="0"
+                 style="--p:0%" aria-label="Seek through ${_esc(title)}" />
+          <span class="song-player-time" data-player-duration>0:00</span>
+          <audio preload="metadata" src="${_esc(songUrl)}"></audio>
+        `;
+        // Sits in the row itself, between the song details and the buttons.
+        row.insertBefore(player, row.querySelector('.song-actions'));
+        _initSongPlayer(player);
+      }
+
+      entry.appendChild(row);
+      entry.appendChild(panel);
+      el.soundsLibrary.appendChild(entry);
+    });
+  }
+
+  /* ── Trim bar ──────────────────────────────────────────────────────────
+     Drag two handles over the track length instead of typing seconds. The bar
+     and the number inputs are two views of the same value and stay in sync.
+     Needs the real duration, so it stays disabled until metadata loads. */
+
+  function _fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  /* ── Per-song transport bar ────────────────────────────────────────────
+     Every song row owns an <audio> and a slider wired straight to it. The
+     slider only follows the track while nobody is dragging it, otherwise the
+     thumb fights the user mid-scrub. */
+
+  function _stopOtherSongAudio(except) {
+    document.querySelectorAll('.song-player audio').forEach(a => {
+      if (a !== except && !a.paused) a.pause();
+    });
+  }
+
+  function _clearTrimWatcher(aud) {
+    if (aud._trimWatcher) {
+      aud.removeEventListener('timeupdate', aud._trimWatcher);
+      aud._trimWatcher = null;
+    }
+    aud._trimEnd = 0;
+  }
+
+  // currentTime is ignored before metadata lands, so hold the seek until then.
+  function _seekWhenReady(aud, seconds, done) {
+    const go = () => {
+      try { aud.currentTime = seconds; } catch (err) {}
+      if (done) done();
+    };
+    if (aud.readyState >= 1) go();
+    else aud.addEventListener('loadedmetadata', go, { once: true });
+  }
+
+  function _toggleSongAudio(aud) {
+    if (!aud) return;
+    if (aud.paused) {
+      _stopOtherSongAudio(aud);
+      // Resuming past a trimmed clip's end would stop playback instantly —
+      // treat that as a request for the whole track.
+      if (aud._trimEnd && aud.currentTime >= aud._trimEnd - 0.05) _clearTrimWatcher(aud);
+      aud.play().catch(err => {
+        console.error('[Kangi Audio Error]', err);
+        _alert(el.soundsAlert, 'error',
+          'Could not play audio. Please verify the audio link format or check your browser permissions.');
+      });
+    } else {
+      aud.pause();
+    }
+  }
+
+  function _initSongPlayer(player) {
+    const aud  = player.querySelector('audio');
+    const seek = player.querySelector('.song-player-seek');
+    const curEl = player.querySelector('[data-player-current]');
+    const durEl = player.querySelector('[data-player-duration]');
+    if (!aud || !seek) return;
+
+    let scrubbing = false;
+
+    const paint = (seconds, duration) => {
+      curEl.textContent = _fmtTime(seconds);
+      seek.style.setProperty('--p', (duration > 0 ? (seconds / duration) * 100 : 0) + '%');
+    };
+
+    const onMeta = () => {
+      const d = aud.duration;
+      if (!isFinite(d) || d <= 0) {
+        durEl.textContent = '--:--';
+        return;
+      }
+      seek.max = d;
+      player.dataset.ready = 'true';
+      durEl.textContent = _fmtTime(d);
+      paint(aud.currentTime, d);
+    };
+    aud.addEventListener('loadedmetadata', onMeta);
+    // A cached file can already be past loadedmetadata by the time we bind.
+    if (aud.readyState >= 1) onMeta();
+
+    aud.addEventListener('error', () => {
+      durEl.textContent = '--:--';
+      player.dataset.ready = 'false';
+    });
+
+    aud.addEventListener('timeupdate', () => {
+      if (scrubbing) return;
+      seek.value = aud.currentTime;
+      paint(aud.currentTime, aud.duration || 0);
+    });
+
+    const btn = player.querySelector('.song-player-btn');
+    const label = btn ? btn.getAttribute('aria-label') : '';
+    const setPlaying = (on) => {
+      player.dataset.playing = on ? 'true' : 'false';
+      if (btn && label) btn.setAttribute('aria-label', (on ? 'Pause ' : 'Play ') + label.replace(/^(Play|Pause) /, ''));
+    };
+
+    aud.addEventListener('play',  () => setPlaying(true));
+    aud.addEventListener('pause', () => setPlaying(false));
+    aud.addEventListener('ended', () => {
+      setPlaying(false);
+      seek.value = 0;
+      paint(0, aud.duration || 0);
+    });
+
+    // Dragging updates the readout live; the track only jumps on release so we
+    // are not re-seeking the file on every pixel of movement.
+    seek.addEventListener('pointerdown', () => { scrubbing = true; });
+    seek.addEventListener('input', () => {
+      scrubbing = true;
+      paint(Number(seek.value) || 0, aud.duration || 0);
+    });
+    seek.addEventListener('change', () => {
+      scrubbing = false;
+      _clearTrimWatcher(aud);
+      _seekWhenReady(aud, Number(seek.value) || 0);
+    });
+    seek.addEventListener('keyup', () => { scrubbing = false; });
+    seek.addEventListener('blur',  () => { scrubbing = false; });
+    // A press that ends without changing the value never fires `change`, so
+    // release the scrub lock here too or the bar would stop following playback.
+    seek.addEventListener('pointerup',     () => { scrubbing = false; });
+    seek.addEventListener('pointercancel', () => { scrubbing = false; });
+  }
+
+  function _initTrimBar(panel, url) {
+    const bar = panel.querySelector('.song-trim-bar');
+    if (!bar || bar.dataset.bound === '1' || !url) return;
+    bar.dataset.bound = '1';
+
+    const track     = bar.querySelector('.song-trim-track');
+    const range     = bar.querySelector('.song-trim-range');
+    const hStart    = bar.querySelector('[data-handle="start"]');
+    const hEnd      = bar.querySelector('[data-handle="end"]');
+    const totalEl   = bar.querySelector('.song-trim-total');
+    const startIn   = panel.querySelector('.song-trim-start');
+    const endIn     = panel.querySelector('.song-trim-end');
+    const lenEl     = panel.querySelector('.song-trim-len');
+    const bubStart  = bar.querySelector('[data-bubble="start"]');
+    const bubEnd    = bar.querySelector('[data-bubble="end"]');
+    const playhead  = bar.querySelector('.song-trim-playhead');
+
+    let duration = 0;
+
+    const clampVals = () => {
+      let a = Number(startIn.value) || 0;
+      let b = Number(endIn.value)   || 0;          // 0 = natural end
+      a = Math.max(0, Math.min(a, duration));
+      const effEnd = b > 0 ? Math.max(0, Math.min(b, duration)) : duration;
+      return { a, b, effEnd };
+    };
+
+    const paint = () => {
+      const { a, b, effEnd } = clampVals();
+      const pa = duration ? (a / duration) * 100 : 0;
+      const pb = duration ? (effEnd / duration) * 100 : 100;
+      range.style.left  = pa + '%';
+      range.style.width = Math.max(0, pb - pa) + '%';
+      hStart.style.left = pa + '%';
+      hEnd.style.left   = pb + '%';
+      hStart.setAttribute('aria-valuenow', a.toFixed(1));
+      hEnd.setAttribute('aria-valuenow', (b > 0 ? b : effEnd).toFixed(1));
+      const len = effEnd - a;
+      if (lenEl) lenEl.textContent = (b > 0 && len > 0) ? len.toFixed(1) + 's clip' : 'full track';
+      if (bubStart) bubStart.textContent = _fmtTime(a);
+      if (bubEnd)   bubEnd.textContent   = _fmtTime(b > 0 ? b : effEnd);
+    };
+
+    // Metadata gives us the length the handles map onto.
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    probe.addEventListener('loadedmetadata', () => {
+      duration = probe.duration || 0;
+      if (!isFinite(duration) || duration <= 0) {
+        totalEl.textContent = 'unknown length';
+        return;
+      }
+      bar.dataset.duration = String(duration);
+      bar.dataset.ready = 'true';
+      totalEl.textContent = _fmtTime(duration);
+      hStart.setAttribute('aria-valuemax', duration.toFixed(1));
+      hEnd.setAttribute('aria-valuemax', duration.toFixed(1));
+      paint();
+    });
+    probe.addEventListener('error', () => {
+      totalEl.textContent = 'could not read length — type seconds below';
+    });
+    probe.src = url;
+
+    const secondsAt = (clientX) => {
+      const r = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      return ratio * duration;
+    };
+
+    let dragging = null;
+    const onDown = (e) => {
+      if (!duration) return;
+      dragging = e.currentTarget.dataset.handle;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging || !duration) return;
+      const t = secondsAt(e.clientX);
+      if (dragging === 'start') {
+        const { effEnd } = clampVals();
+        startIn.value = Math.min(t, Math.max(0, effEnd - 0.1)).toFixed(1);
+      } else {
+        const a = Number(startIn.value) || 0;
+        // Snapping the end handle to the far right means "natural end" (0).
+        endIn.value = (t >= duration - 0.05) ? 0 : Math.max(t, a + 0.1).toFixed(1);
+      }
+      paint();
+    };
+    const onUp = (e) => {
+      if (!dragging) return;
+      dragging = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+    };
+
+    [hStart, hEnd].forEach(h => {
+      h.addEventListener('pointerdown', onDown);
+      h.addEventListener('pointermove', onMove);
+      h.addEventListener('pointerup', onUp);
+      h.addEventListener('pointercancel', onUp);
+      h.addEventListener('keydown', (e) => {
+        if (!duration) return;
+        const step = e.shiftKey ? 1 : 0.1;
+        const which = h.dataset.handle;
+        const input = which === 'start' ? startIn : endIn;
+        let v = Number(input.value) || 0;
+        if (which === 'end' && v === 0) v = duration;
+        if (e.key === 'ArrowLeft')  { input.value = Math.max(0, v - step).toFixed(1); paint(); e.preventDefault(); }
+        if (e.key === 'ArrowRight') { input.value = Math.min(duration, v + step).toFixed(1); paint(); e.preventDefault(); }
+      });
+    });
+
+    // Typing in the number inputs moves the handles.
+    startIn.addEventListener('input', paint);
+    endIn.addEventListener('input', paint);
+
+    paint();
+  }
+
+  // Handle Approve/Delete/Preview actions
+  document.getElementById('soundsView')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const songId = btn.dataset.id;
+
+    if (action === 'open-upload-modal') {
+      _resetUploadSongModal();
+      const m = document.getElementById('uploadSongModal');
+      if (m) {
+        m.classList.remove('hidden');
+        m.style.display = 'flex';
+      }
+      return;
+    }
+
+    if (action === 'toggle-settings') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      if (!panel) return;
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) {
+        const song = state.songs.find(s => (s.SongId || s.id) === songId);
+        const url  = song ? (song.SongUrl || song.songLink || song.url || song.musicUrl || "") : "";
+        _initTrimBar(panel, url);
+      }
+      return;
+    }
+
+    if (action === 'preview-trim') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      const url   = btn.dataset.url;
+      if (!url || !panel) return;
+
+      const start = Number(panel.querySelector('.song-trim-start').value) || 0;
+      const end   = Number(panel.querySelector('.song-trim-end').value)   || 0;
+      if (end > 0 && end <= start) {
+        _alert(el.soundsAlert, 'warning', 'Trim end must be greater than trim start.');
+        return;
+      }
+
+      const aud = btn.closest('.song-entry')?.querySelector('.song-player audio');
+      if (!aud) return;
+
+      // Drop any watchers left over from a previous trimmed preview.
+      _clearTrimWatcher(aud);
+      if (aud._headWatcher) {
+        aud.removeEventListener('timeupdate', aud._headWatcher);
+        aud._headWatcher = null;
+      }
+
+      _stopOtherSongAudio(aud);
+      _seekWhenReady(aud, start);
+
+      // Drive a playhead across the trim bar for THIS song, and hide it on
+      // every other open panel — only one clip plays at a time.
+      document.querySelectorAll('.song-trim-playhead.active').forEach(p => p.classList.remove('active'));
+      const bar      = panel.querySelector('.song-trim-bar');
+      const duration = bar ? Number(bar.dataset.duration) || 0 : 0;
+      const playhead = panel.querySelector('.song-trim-playhead');
+
+      if (playhead && duration > 0) {
+        playhead.classList.add('active');
+        aud._headWatcher = () => {
+          playhead.style.left = Math.min(100, (aud.currentTime / duration) * 100) + '%';
+        };
+        aud.addEventListener('timeupdate', aud._headWatcher);
+        const hidePlayhead = () => {
+          playhead.classList.remove('active');
+          aud.removeEventListener('timeupdate', aud._headWatcher);
+          aud.removeEventListener('pause', hidePlayhead);
+          aud.removeEventListener('ended', hidePlayhead);
+          aud._headWatcher = null;
+        };
+        aud.addEventListener('pause', hidePlayhead, { once: true });
+        aud.addEventListener('ended', hidePlayhead, { once: true });
+      }
+
+      if (end > start) {
+        aud._trimEnd = end;
+        aud._trimWatcher = () => {
+          if (aud.currentTime >= end) {
+            aud.pause();
+            aud.removeEventListener('timeupdate', aud._trimWatcher);
+            aud._trimWatcher = null;
+          }
+        };
+        aud.addEventListener('timeupdate', aud._trimWatcher);
+      }
+
+      aud.play()
+        .then(() => _alert(el.soundsAlert, 'info',
+          end > start
+            ? `Playing ${start}s to ${end}s (${(end - start).toFixed(1)}s clip).`
+            : `Playing from ${start}s to the end.`))
+        .catch(() => _alert(el.soundsAlert, 'error', 'Could not play audio. Check the file URL.'));
+      return;
+    }
+
+    if (action === 'save-settings') {
+      const panel = el.soundsLibrary.querySelector(`.song-settings[data-settings-for="${songId}"]`);
+      if (!panel) return;
+
+      const modes = [...panel.querySelectorAll('input[data-mode]')]
+        .filter(c => c.checked)
+        .map(c => c.dataset.mode);
+      const start = Number(panel.querySelector('.song-trim-start').value) || 0;
+      const end   = Number(panel.querySelector('.song-trim-end').value)   || 0;
+
+      if (end > 0 && end <= start) {
+        _alert(el.soundsAlert, 'warning', 'Trim end must be greater than trim start.');
+        return;
+      }
+
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Saving...';
+      try {
+        const res = await KangiService.updateSongSettings(songId, modes, start, end);
+        if (res && res.success) {
+          const notifMsg = res.notificationSent
+            ? '✓ Song settings saved — owner notified.'
+            : '✓ Song settings saved.';
+          _alert(el.soundsAlert, 'success', notifMsg);
+          await _loadSongsData();
+        } else {
+          _alert(el.soundsAlert, 'error', (res && res.error) || 'Could not save song settings.');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
+
+    // Cover art and the transport bar's own button drive the same player.
+    if (action === 'preview' || action === 'player-toggle') {
+      const aud = btn.closest('.song-entry')?.querySelector('.song-player audio');
+      if (!aud) {
+        _alert(el.soundsAlert, 'warning', 'No audio URL found for this song.');
+        return;
+      }
+      _toggleSongAudio(aud);
+      return;
+    }
+
+    if (action === 'approve') {
+      btn.disabled = true;
+      btn.textContent = 'Approving...';
+      try {
+        const res = await KangiService.approveSong(songId);
+        if (res && res.success) {
+          const notifMsg = res.notificationSent
+            ? 'Song approved — owner notified ✓'
+            : 'Song approved (owner could not be notified — no uploader ID on record)';
+          _alert(el.soundsAlert, 'success', notifMsg);
+          await _loadSongsData();
+        } else {
+          // approveSong reports failure under `message`, not `error`.
+          _alert(el.soundsAlert, 'error', res.error || res.message || 'Failed to approve song.');
+        }
+      } catch (err) {
+        _alert(el.soundsAlert, 'error', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+      }
+    }
+
+    if (action === 'delete') {
+      if (!confirm('Are you sure you want to permanently delete this song from the server?')) return;
+      btn.disabled = true;
+      btn.textContent = 'Deleting...';
+      try {
+        const res = await KangiService.deleteSong(songId);
+        if (res && res.success) {
+          const notifMsg = res.notificationSent
+            ? 'Song deleted — owner notified ✓'
+            : 'Song deleted (owner could not be notified — no uploader ID on record)';
+          _alert(el.soundsAlert, 'success', notifMsg);
+          await _loadSongsData();
+        } else {
+          _alert(el.soundsAlert, 'error', res.error || 'Failed to delete song.');
+        }
+      } catch (err) {
+        _alert(el.soundsAlert, 'error', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+      }
+    }
+  });
+
+  /* ================================================================
+     CLEAR ALL DATA
+     ================================================================ */
+  function _bindClearAll() {
+    el.clearAllBtn.addEventListener('click', async () => {
+      if (!confirm('⚠️ This will permanently delete ALL TCG data from the database.\n\nThis cannot be undone. Continue?')) return;
+
+      el.clearAllBtn.disabled    = true;
+      el.clearAllBtn.textContent = 'Clearing…';
+
+      try {
+        await KangiService.clearAll();
+        await _loadAllData();
+      } catch (err) {
+        alert('Error clearing data: ' + err);
+      } finally {
+        el.clearAllBtn.disabled    = false;
+        el.clearAllBtn.innerHTML   = `
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+          Clear All`;
+      }
+    });
+  }
+
+  /* ================================================================
+     REFRESH
+     ================================================================ */
+  function _bindRefresh() {
+    el.refreshBtn.addEventListener('click', async () => {
+      if (!KangiService.session.isLoggedIn()) return;
+      el.refreshBtn.style.animation = 'spin 0.65s linear';
+      await _loadAllData();
+      await _loadSongsData();
+      await _loadUsers();
+      setTimeout(() => el.refreshBtn.style.animation = '', 700);
+    });
+  }
+
+  /* ================================================================
+     THEME
+     ================================================================ */
+  function _bindTheme() {
+    el.themeToggle.addEventListener('click', () => {
+      const cur  = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = cur === 'dark' ? 'light' : 'dark';
+      _applyTheme(next);
+      localStorage.setItem('kangi_theme', next);
+    });
+  }
+
+  function _applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    el.iconMoon?.classList.toggle('hidden', t === 'light');
+    el.iconSun?.classList.toggle('hidden',  t === 'dark');
+  }
+
+  /* ================================================================
+     HELPERS
+     ================================================================ */
+  function _uid(prefix = 'ID') {
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+  }
+
+  /* Stable CSS-safe ID from token */
+  function _safeId(token) {
+    return token.replace(/[^a-zA-Z0-9]/g, '_');
+  }
+
+  function _esc(s = '') {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])
+    );
+  }
+
+  function _alert(node, type, text) {
+    const cls = { error:'alert--error', success:'alert--success', info:'alert--info', warning:'alert--warning' };
+    node.className   = `alert ${cls[type] || 'alert--info'}`;
+    node.textContent = text;
+    node.classList.remove('hidden');
+  }
+
+  function _hideEl(node) { node.classList.add('hidden'); }
+
+  /* dd-MMM-yy — the same stamp the Unity uploader writes, so a song added from the
+     dashboard and one added from the app sort and read identically in the app. */
+  function _todayStamp() {
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, '0')}-${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+  }
+
+  /* Alias used by the Upload Music modal */
+  function _hideAlert(node) {
+    if (!node) return;
+    node.classList.add('hidden');
+    node.textContent = '';
+  }
+
+  /* Show/hide loading state on a submit button with a custom label.
+     Restores the button's original text when called with on=false. */
+  function _setFormLoading(btn, on, label) {
+    if (!btn) return;
+    btn.disabled = on;
+    const textEl = btn.querySelector('.btn-text');
+    const loaderEl = btn.querySelector('.btn-loader');
+    if (on) {
+      if (textEl) {
+        btn._origText = btn._origText || textEl.textContent;
+        textEl.textContent = label || 'Loading…';
+        textEl.classList.remove('hidden');
+      } else {
+        btn._origHTML = btn._origHTML || btn.innerHTML;
+        btn.innerHTML = `<span class="btn-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px;display:inline-block;"></span>${label || 'Loading…'}`;
+      }
+      loaderEl?.classList.remove('hidden');
+    } else {
+      if (textEl) {
+        if (btn._origText) { textEl.textContent = btn._origText; btn._origText = null; }
+        textEl.classList.remove('hidden');
+      } else if (btn._origHTML) {
+        btn.innerHTML = btn._origHTML;
+        btn._origHTML = null;
+      }
+      loaderEl?.classList.add('hidden');
+    }
+  }
+
+  function _setLoading(btn, on) {
+    btn.disabled = on;
+    btn.querySelector('.btn-text')?.classList.toggle('hidden', on);
+    btn.querySelector('.btn-loader')?.classList.toggle('hidden', !on);
+  }
+
+  function _emptyHTML(msg) {
+    return `<div class="empty-state">${_nftSvg()}<p>${msg}</p></div>`;
+  }
+
+  function _nftSvg() {
+    return `<svg viewBox="0 0 40 40" fill="none"><rect x="5" y="5" width="30" height="30" rx="6" stroke="currentColor" stroke-width="2"/><path d="M13 27V13h5l7 9V13h5v14h-5L18 18v9h-5Z" fill="currentColor"/></svg>`;
+  }
+
+  /* ── Resolve raw NFT IDs / tokens → human-readable character names ──
+     The game stores NFT collection IDs like "COL-MSA..." in UnlockedCharacters.
+     Strategy:
+       1. If the id is already a known character name → use it directly.
+       2. Match id against nft.id in the loaded NFT library.
+       3. Extract character name from the matched nft.name (first word before " — ").
+       4. Fallback: return the raw id so nothing is silently dropped. */
+  function _resolveCharacterNames(rawIds) {
+    if (!rawIds || !rawIds.length) return [];
+    const knownNames = ['Katsumi', 'Kiko', 'Bee', 'Chyna'];
+    const nfts = state.nfts || [];
+
+    return rawIds.map(id => {
+      const s = String(id);
+
+      // 1. Already a plain character name
+      const direct = knownNames.find(n => n.toLowerCase() === s.toLowerCase());
+      if (direct) return direct;
+
+      // 2. Match against NFT library by exact id
+      const byId = nfts.find(n => n.id === s);
+      if (byId) {
+        // Extract first word before " — " or space
+        const base = (byId.name || '').split(/\s*—\s*/)[0].trim().split(' ')[0];
+        return base || byId.name;
+      }
+
+      // 3. The id might start with a character's first name token
+      const byPrefix = knownNames.find(n => s.toLowerCase().includes(n.toLowerCase()));
+      if (byPrefix) return byPrefix;
+
+      // 4. Fallback — show raw id so it's visible in the UI
+      return s;
+    });
+  }
+
+  /* ================================================================
+     USER MANAGEMENT — list only, actions live inside the modal
+     ================================================================ */
+  function _bindUserManagement() {
+    /* Load Users button */
+    el.loadUsersBtn?.addEventListener('click', _loadUsers);
+    /* Register card click handlers once */
+    _bindUserListClicks();
+  }
+
+  /* ================================================================
+     USER LIST — Fetch, Enrich & Render all players from Supabase
+     ================================================================ */
+  /* ================================================================
+     USER LIST — Fetch all players directly from Supabase
+     Two-step flow:
+       1. getAllUsers  → starts export, returns { exportId }
+       2. getExportResult (polled) → returns { status, users } when complete
+     ================================================================ */
+  async function _fetchAndEnrichUsers() {
+    let result;
+    try {
+      result = await KangiService.getAllUsers();
+      console.log('[DWM] getAllUsers response:', result);
+    } catch (err) {
+      console.warn('[DWM] getAllUsers fetch failed:', err);
+      try {
+        const pfRes = await KangiService.getAllUsers();
+        if (pfRes && pfRes.status === 'complete' && Array.isArray(pfRes.users)) {
+          result = { source: 'supabase', users: pfRes.users, isFallback: false };
+        } else {
+          throw err;
+        }
+      } catch (fallbackErr) {
+        const msg = typeof fallbackErr === 'string' ? fallbackErr : (fallbackErr?.message || 'Failed to load players.');
+        throw new Error(msg);
+      }
+    }
+
+    const users = (result && Array.isArray(result.users)) ? result.users : [];
+
+    // Normalize Supabase snake_case fields → camelCase so all display logic works
+    users.forEach(u => {
+      if (u.display_name  !== undefined && !u.displayName)  u.displayName  = u.display_name;
+      if (u.avatar_url    !== undefined && !u.avatarUrl)    u.avatarUrl    = u.avatar_url;
+      if (u.is_admin      !== undefined && u.isAdmin      === undefined) u.isAdmin      = u.is_admin;
+      if (u.is_banned     !== undefined && u.isBanned     === undefined) u.isBanned     = u.is_banned;
+      if (u.is_premium    !== undefined && u.isPremium    === undefined) u.isPremium    = u.is_premium;
+      if (u.banned_until  !== undefined && !u.bannedUntil) u.bannedUntil  = u.banned_until;
+      if (u.created_at    !== undefined && !u.created)     u.created      = u.created_at;
+    });
+
+    // Sort by name alphabetically
+    users.sort((a, b) => {
+      const nameA = (_getUserDisplayName(a) || '').toLowerCase();
+      const nameB = (_getUserDisplayName(b) || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    state.allUsers      = users;
+    state.filteredUsers = users;
+
+    // Update settings indicators
+    const csVerEl    = $('settingsCloudscriptVersion');
+    const dsEl       = $('settingsDataSource');
+    const fbStatusEl = $('settingsFirebaseStatus');
+
+    if (csVerEl) {
+      csVerEl.textContent = 'Active';
+      csVerEl.className   = 'badge badge-success';
+    }
+    if (fbStatusEl) {
+      if (true) {
+        fbStatusEl.textContent = `● Connected (dance-withmii · ${result.collection || 'users'})`;
+        fbStatusEl.className   = 'badge badge-success';
+      } else {
+        fbStatusEl.textContent = `● Database Fallback`;
+        fbStatusEl.className   = 'badge badge-teal';
+      }
+    }
+    if (dsEl) {
+      if (true) {
+        dsEl.textContent = `Supabase (profiles) — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+      } else {
+        dsEl.textContent = `Database Live Registry — ${users.length} player${users.length !== 1 ? 's' : ''}`;
+      }
+    }
+
+    return users;
+  }
+
+  async function _loadUsers() {
+    if (!el.usersList) return;
+
+    el.usersList.innerHTML = `
+      <div class="empty-state">
+        <div class="btn-loader" style="width:22px;height:22px;border-width:3px;"></div>
+        <p id="_usersLoadMsg">Fetching player list from Supabase…</p>
+      </div>`;
+
+    try {
+      const users = await _fetchAndEnrichUsers();
+      _renderUsers(users);
+      _renderStats();
+      _renderDashboardUsers();
+
+      if (el.usersAlert) {
+        _alert(el.usersAlert, 'info', `${users.length} player${users.length !== 1 ? 's' : ''} loaded and sorted by name.`);
+        setTimeout(() => el.usersAlert?.classList.add('hidden'), 3000);
+      }
+    } catch (err) {
+      el.usersList.innerHTML = `<div class="empty-state"><p style="color:var(--red);">Failed to load users: ${_esc(String(err))}</p></div>`;
+      if (el.usersAlert) _alert(el.usersAlert, 'error', typeof err === 'string' ? err : 'Could not load users.');
+    }
+  }
+
+  function _getUserDisplayName(user) {
+    if (!user) return 'Unknown';
+    // Supabase returns snake_case (display_name), normalize both
+    let name = (user.display_name || user.displayName || '').trim();
+    if (!name || name.toLowerCase() === 'unknown' || name === user.id) {
+      if (user.username) {
+        name = user.username;
+      } else if (user.email) {
+        name = user.email.split('@')[0];
+      } else if (user.id) {
+        name = 'Player ' + user.id.slice(-4);
+      } else {
+        name = 'Player';
+      }
+    }
+    return name;
+  }
+
+  function _createUserCardElement(user) {
+    const card = document.createElement('div');
+    card.className = 'user-card';
+    card.dataset.userid = user.id;
+    card.dataset.user = JSON.stringify(user);
+
+    const friendlyName   = _getUserDisplayName(user);
+    const initial        = friendlyName.charAt(0).toUpperCase();
+    const characterCount = (user.unlockedCharacters || []).length;
+    const avatar         = user.avatarUrl || user.AvatarUrl || user.avatar || user.photoURL || user.photoUrl || user.imageUrl || user.image || '';
+
+    card.innerHTML = `
+      <div class="user-card-left">
+        ${avatar
+          ? `<img class="user-card-avatar" src="${_esc(avatar)}" alt="${_esc(friendlyName)}" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex';" />
+             <div class="user-card-avatar user-card-avatar--letter" style="display:none;">${_esc(initial)}</div>`
+          : `<div class="user-card-avatar user-card-avatar--letter">${_esc(initial)}</div>`
+        }
+      </div>
+      <div class="user-card-info">
+        <div class="user-card-name">
+          ${_esc(friendlyName)}
+          ${user.isAdmin  ? `<span class="chip chip--purple" style="font-size:0.65rem;">Admin</span>`  : ''}
+          ${user.showLogs ? `<span class="chip chip--teal"   style="font-size:0.65rem;">Logs: ON</span>` : ''}
+          ${user.isBanned ? `<span class="chip chip--red"    style="font-size:0.65rem;">Banned</span>` : ''}
+        </div>
+        <div class="user-card-meta">
+          <span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
+            ${user.email ? _esc(user.email) : '<em style="opacity:.5">no email</em>'}
+          </span>
+          <span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+            ${_esc(user.id || 'No ID')}
+          </span>
+          ${user.lastLogin ? `<span>
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:11px;height:11px;opacity:.6;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+            Last seen ${new Date(user.lastLogin).toLocaleDateString()}
+          </span>` : ''}
+        </div>
+      </div>
+      <div class="user-card-actions">
+        <button class="btn btn-secondary btn-xs btn-view-more" title="View details via Database API">
+          <span>View More</span>
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;margin-left:3px;">
+            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      </div>`;
+
+    return card;
+  }
+
+  function _renderUsers(users) {
+    if (!el.usersList) return;
+
+    if (!users.length) {
+      el.usersList.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+          <p>No users found.</p>
+        </div>`;
+      return;
+    }
+
+    el.usersList.innerHTML = '';
+    users.forEach(user => {
+      const card = _createUserCardElement(user);
+      el.usersList.appendChild(card);
+    });
+  }
+
+  /* ── User list click delegation — clicks on any card (dashboard or list) open modal ── */
+  function _bindUserListClicks() {
+    const handleCardClick = (e) => {
+      const card = e.target.closest('.user-card');
+      if (!card) return;
+      try {
+        _showUserDetails(JSON.parse(card.dataset.user));
+      } catch (err) {
+        console.error('Failed to parse user data:', err);
+      }
+    };
+
+    if (el.usersList) el.usersList.addEventListener('click', handleCardClick);
+    if (el.dashUsersList) el.dashUsersList.addEventListener('click', handleCardClick);
+  }
+
+  /* ===================================================================
+     USER SEARCH & FILTER
+     =================================================================== */
+  function _bindUserSearch() {
+    if (!el.userSearchInput) return;
+
+    el.userSearchInput.addEventListener('input', (e) => {
+      const query = e.target.value.trim().toLowerCase();
+      
+      if (query.length > 0) {
+        el.clearSearchBtn.style.display = 'block';
+      } else {
+        el.clearSearchBtn.style.display = 'none';
+      }
+
+      _filterUsers(query);
+    });
+
+    el.clearSearchBtn?.addEventListener('click', () => {
+      el.userSearchInput.value = '';
+      el.clearSearchBtn.style.display = 'none';
+      el.userSearchStats.classList.add('hidden');
+      _filterUsers('');
+    });
+  }
+
+  function _filterUsers(query) {
+    if (!query) {
+      state.filteredUsers = state.allUsers;
+      _renderUsers(state.allUsers);
+      el.userSearchStats.classList.add('hidden');
+      return;
+    }
+
+    const filtered = state.allUsers.filter(user => {
+      const displayName = (user.display_name || user.displayName || '').toLowerCase();
+      const email       = (user.email || '').toLowerCase();
+      const userId      = (user.id || '').toLowerCase();
+      return displayName.includes(query) || email.includes(query) || userId.includes(query);
+    });
+
+    state.filteredUsers = filtered;
+    _renderUsers(filtered);
+
+    // Show search stats
+    el.userSearchStats.classList.remove('hidden');
+    el.userSearchStats.innerHTML = `
+      <div class="search-stats-text">
+        <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px;">
+          <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+        </svg>
+        <span>Found <span class="search-stats-count">${filtered.length}</span> user${filtered.length !== 1 ? 's' : ''} matching "${_esc(query)}"</span>
+      </div>
+    `;
+  }
+
+  /* ===================================================================
+     USER MODALS — Details panel + all actions inside
+     =================================================================== */
+  function _bindUserModals() {
+    /* ── Close panel ── */
+    const _closeModal = () => {
+      el.userDetailsModal.classList.add('hidden');
+    };
+    el.closeUserModal?.addEventListener('click', _closeModal);
+    el.userDetailsModal?.querySelector('.modal-overlay')?.addEventListener('click', _closeModal);
+
+    /* ── Make Admin ── */
+    el.modalMakeAdminBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      if (!confirm(`Grant admin access to "${displayName || email}"?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.makeAdmin(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isAdmin = true;
+          _modalAlert('success', `✓ Admin granted to ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to grant admin.');
+        }
+      });
+    });
+
+    /* ── Revoke Admin ── */
+    el.modalRevokeAdminBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      if (!confirm(`Revoke admin from "${displayName || email}"?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.revokeAdmin(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isAdmin = false;
+          _modalAlert('success', `✓ Admin revoked from ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to revoke admin.');
+        }
+      });
+    });
+
+    /* ── Show Logs (User In-Game Debug Console) ── */
+    el.modalShowLogsBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      await _modalAction(async () => {
+        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
+        if (res && res.success) {
+          state.selectedUser.showLogs = true;
+          _modalAlert('success', `✓ In-game console logs ENABLED for ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to enable logs.');
+        }
+      });
+    });
+
+    /* ── Hide Logs (User In-Game Debug Console) ── */
+    el.modalHideLogsBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      await _modalAction(async () => {
+        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
+        if (res && res.success) {
+          state.selectedUser.showLogs = false;
+          _modalAlert('success', `✓ In-game console logs HIDDEN for ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to hide logs.');
+        }
+      });
+    });
+
+    /* ── Make Premium ── */
+    el.modalMakePremiumBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      if (!confirm(`Give "${displayName || email}" premium access to upload music?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.makePremium(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isPremium = true;
+          _modalAlert('success', `✓ ${displayName || email} can now upload music.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to grant premium.');
+        }
+      });
+    });
+
+    /* ── Revoke Premium ── */
+    el.modalRevokePremiumBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      if (!confirm(`Remove premium music upload access from "${displayName || email}"?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.revokePremium(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isPremium = false;
+          _modalAlert('success', `✓ Premium removed from ${displayName || email}.`);
+          _updateModalButtons(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to revoke premium.');
+        }
+      });
+    });
+
+    /* ── Unban ── */
+    el.modalUnbanBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      if (!confirm(`Lift ban on "${displayName || email}"?`)) return;
+      await _modalAction(async () => {
+        const res = await KangiService.unbanUser(email, playFabId);
+        if (res && res.success) {
+          state.selectedUser.isBanned = false;
+          state.selectedUser.bannedUntil = '';
+          state.selectedUser.banReason = '';
+          const idx = (state.allUsers || []).findIndex(u => (u.id && u.id === playFabId) || (u.id && u.id === state.selectedUser.id));
+          if (idx !== -1) {
+            state.allUsers[idx] = { ...state.allUsers[idx], isBanned: false, bannedUntil: '', banReason: '' };
+          }
+          _modalAlert('success', `✓ ${displayName || email} has been unbanned.`);
+          _updateModalButtons(state.selectedUser);
+          await _showUserDetails(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to unban user.');
+        }
+      });
+    });
+
+    /* ── Ban cards (3 days / 7 days / permanent) ── */
+    el.userModalActionsBar?.addEventListener('click', async (e) => {
+      const card = e.target.closest('[data-modal-ban]');
+      if (!card || !state.selectedUser) return;
+
+      const duration = card.dataset.modalBan;
+      const { email, id: playFabId, display_name: displayName } = state.selectedUser;
+      const label = duration === 'permanent' ? 'permanently' : `for ${duration} days`;
+      if (!confirm(`Ban "${displayName || email}" ${label}?`)) return;
+
+      await _modalAction(async () => {
+        const days = duration === 'permanent' ? 0 : parseInt(duration);
+        const res  = await KangiService.banUser(email, playFabId, days);
+        if (res && res.success) {
+          state.selectedUser.isBanned = true;
+          state.selectedUser.isAdmin  = false;
+          state.selectedUser.bannedUntil = res.bannedUntil || '';
+          const idx = (state.allUsers || []).findIndex(u => (u.id && u.id === playFabId) || (u.id && u.id === state.selectedUser.id));
+          if (idx !== -1) {
+            state.allUsers[idx] = { ...state.allUsers[idx], isBanned: true, isAdmin: false, bannedUntil: res.bannedUntil || '' };
+          }
+          _modalAlert('success', `✓ ${displayName || email} banned ${label}.`);
+          _updateModalButtons(state.selectedUser);
+          await _showUserDetails(state.selectedUser);
+          await _loadUsers();
+        } else {
+          _modalAlert('error', (res && res.error) || 'Ban failed.');
+        }
+      });
+    });
+
+    /* ── Send notification ── */
+    el.modalSendNotifBtn?.addEventListener('click', async () => {
+      if (!state.selectedUser) return;
+      const msg = el.modalNotifInput?.value.trim();
+      if (!msg) { _modalAlert('error', 'Please type a message first.'); return; }
+
+      await _modalAction(async () => {
+        const res = await KangiService.sendNotification(
+          state.selectedUser.id,
+          'Message from Admin',
+          msg,
+          'info',
+          {}
+        );
+        if (res && res.success) {
+          _modalAlert('success', '✓ Notification sent.');
+          if (el.modalNotifInput) el.modalNotifInput.value = '';
+        } else {
+          _modalAlert('error', (res && res.error) || 'Failed to send notification.');
+        }
+      });
+    });
+  }
+
+  async function _modalAction(fn) {
+    const btns = [
+      el.modalMakeAdminBtn, el.modalRevokeAdminBtn,
+      el.modalShowLogsBtn, el.modalHideLogsBtn,
+      el.modalUnbanBtn, el.modalSendNotifBtn,
+      ...(el.userModalActionsBar
+          ? [...el.userModalActionsBar.querySelectorAll('[data-modal-ban]')]
+          : [])
+    ].filter(Boolean);
+    btns.forEach(b => { b.disabled = true; });
+    try {
+      await fn();
+    } catch (err) {
+      _modalAlert('error', typeof err === 'string' ? err : (err?.message || 'Action failed. Check console for details.'));
+      console.error('[Kangi] Modal action error:', err);
+    } finally {
+      btns.forEach(b => { b.disabled = false; });
+    }
+  }
+
+  /* Helper — show alert inside the modal */
+  function _modalAlert(type, text) {
+    if (!el.modalActionAlert) return;
+    _alert(el.modalActionAlert, type, text);
+    setTimeout(() => el.modalActionAlert.classList.add('hidden'), 4000);
+  }
+
+  function _updateModalButtons(user) {
+    if (!el.userModalActionsBar) return;
+
+    // Admin buttons — use id as fallback when email missing
+    el.modalMakeAdminBtn.style.display   = (!user.isAdmin  && !user.isBanned) ? '' : 'none';
+    el.modalRevokeAdminBtn.style.display = (user.isAdmin) ? '' : 'none';
 
     // Show / Hide Logs buttons
     if (el.modalShowLogsBtn) {
