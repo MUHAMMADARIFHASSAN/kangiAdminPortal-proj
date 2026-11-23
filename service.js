@@ -267,12 +267,13 @@ const KangiService = (function () {
      ============================================================ */
   async function getAllUsers() {
     try {
-      var rows = await _get('/admin_users', {
-        'select': 'id,email,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at,last_sign_in_at',
-        'order':  'created_at.desc'
-      });
+      // Admin-only server function (migration 018) — includes email + last sign-in
+      var rows = await _rpc('admin_list_users', {});
       return { success: true, users: rows || [] };
     } catch(e) {
+      if (String(e.message).indexOf('admin_list_users') === -1) {
+        console.warn('[KangiService] admin_list_users failed, falling back to profiles:', e.message);
+      }
       var rows2 = await _get('/profiles', {
         'select': 'id,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at',
         'order':  'created_at.desc'
@@ -283,7 +284,7 @@ const KangiService = (function () {
 
   async function getUserByEmail(email) {
     try {
-      const rows = await _get('/admin_users?email=eq.' + encodeURIComponent(email) + '&select=id,display_name,email,is_admin');
+      const rows = await _rpc('admin_list_users', { p_email: email });
       return rows && rows[0] ? rows[0] : null;
     } catch (e) {
       return null;
@@ -486,6 +487,8 @@ const KangiService = (function () {
       });
       if (!codesRes.ok) {
         var e2 = await codesRes.json().catch(function() { return {}; });
+        // Don't leave an empty batch behind when its codes could not be saved
+        await _delete('/tcg_batches?id=eq.' + encodeURIComponent(nftObj.id)).catch(function() {});
         throw new Error((e2 && e2.message) || ('Codes insert failed: HTTP ' + codesRes.status));
       }
     }

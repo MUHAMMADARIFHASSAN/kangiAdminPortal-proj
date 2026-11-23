@@ -14,6 +14,8 @@ Run these files **in order** in the Supabase Dashboard → SQL Editor.
 | `008_security_columns.sql` | Locks admin/banned/premium columns (no client self-grant); admin RPCs `set_admin_status` / `set_premium_status`; public read of profile display name + avatar |
 | `009_songs_full_columns.sql` | Extends `songs` with modes/trim/uploader fields + `songs` audio storage bucket |
 | `016_admin_actions_server_guard.sql` | Server-side guard: only a non-banned admin can make admin / premium / ban / unban (trigger on `profiles` + hardened RPCs + `am_i_admin()` for dashboard login); removes `register_as_admin` |
+| `017_unlock_codes_serial_redeem_url.sql` | Adds missing `serial` + `redeem_url` columns to `unlock_codes` (fixes TCG/QR batch publish error) |
+| `018_admin_list_users.sql` | Admin-only `admin_list_users()` RPC (emails + last sign-in) — replaces the `admin_users` view that returned 403 |
 
 ## How to run
 
