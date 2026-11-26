@@ -217,23 +217,63 @@ const KangiService = (function () {
     };
   }
 
+  /* Looks up a song's uploader and title (for owner notifications). */
+  async function _songOwner(songId) {
+    try {
+      var rows = await _get('/songs', { 'id': 'eq.' + songId, 'select': 'submitted_by,title' });
+      return rows && rows[0] ? rows[0] : null;
+    } catch (e) { return null; }
+  }
+
+  /* Notifies the song's uploader through the existing admin-only
+     send_notification RPC. Never throws — the song change already
+     succeeded; a failed notification is only reported. */
+  async function _notifySongOwner(song, title, body, type) {
+    if (!song || !song.submitted_by) return false;
+    try {
+      await _rpc('send_notification', {
+        target_user: song.submitted_by,
+        notif_title: title,
+        notif_body:  body,
+        notif_type:  type
+      });
+      return true;
+    } catch (e) {
+      console.warn('[KangiService] Could not notify song owner:', e);
+      return false;
+    }
+  }
+
+  function _songName(song) {
+    return '"' + ((song && song.title) || 'Your song') + '"';
+  }
+
   async function approveSong(songId) {
+    var song = await _songOwner(songId);
     await _patch('/songs?id=eq.' + songId, { status: 'approved' });
-    return { success: true };
+    var sent = await _notifySongOwner(song, 'Song Approved',
+      _songName(song) + ' is approved and now available.', 'audio_approved');
+    return { success: true, notificationSent: sent };
   }
 
   async function deleteSong(songId) {
+    var song = await _songOwner(songId);   // read before the row is gone
     await _delete('/songs?id=eq.' + songId);
-    return { success: true };
+    var sent = await _notifySongOwner(song, 'Song Removed',
+      _songName(song) + ' was removed by the admin.', 'audio_deleted');
+    return { success: true, notificationSent: sent };
   }
 
   async function updateSongSettings(songId, modes, tsStart, tsEnd) {
+    var song = await _songOwner(songId);
     await _patch('/songs?id=eq.' + songId, {
       modes:      Array.isArray(modes) ? modes : [],
       trim_start: Number(tsStart) || 0,
       trim_end:   Number(tsEnd)   || 0
     });
-    return { success: true };
+    var sent = await _notifySongOwner(song, 'Song Updated',
+      'The admin updated the settings of ' + _songName(song) + '.', 'audio_settings_updated');
+    return { success: true, notificationSent: sent };
   }
 
   async function addSong(songData, autoApprove) {
