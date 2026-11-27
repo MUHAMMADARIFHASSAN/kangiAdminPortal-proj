@@ -340,6 +340,46 @@
     _switchView('dashboard');
     _loadAllData();
     _checkHashRedeem();
+    _startAuthWatch();
+  }
+
+  /* ================================================================
+     AUTHORISATION WATCH — every 5 s and on every tab click
+     ================================================================ */
+  const AUTH_CHECK_MS = 5000;
+  let _authTimer = null;
+
+  function _startAuthWatch() {
+    _stopAuthWatch();
+    _authTimer = setInterval(_verifyAuthorization, AUTH_CHECK_MS);
+  }
+
+  function _stopAuthWatch() {
+    if (_authTimer) clearInterval(_authTimer);
+    _authTimer = null;
+  }
+
+  async function _verifyAuthorization() {
+    if (el.appView.classList.contains('hidden')) return true;   // not logged in
+    const status = await KangiService.checkAuthorization();
+    if (status === 'ok' || status === 'offline') return true;  // offline: keep session, retry
+    _forceLogout(status === 'not_admin'
+      ? 'Your administrator access was removed. Please contact the owner.'
+      : 'Your session has expired. Please log in again.');
+    return false;
+  }
+
+  function _forceLogout(message) {
+    _stopAuthWatch();
+    KangiService.logout();
+    state.nfts  = [];
+    state.songs = [];
+    el.userDetailsModal?.classList.add('hidden');
+    el.appView.classList.add('hidden');
+    el.loginView.classList.remove('hidden');
+    el.loginPass.value = '';
+    location.hash = '';
+    _alert(el.loginAlert, 'error', message);
   }
 
   /* ================================================================
@@ -349,6 +389,7 @@
     document.querySelectorAll('#logoutBtn').forEach(btn => {
       btn.addEventListener('click', () => {
         if (!confirm('Are you sure you want to sign out of your admin session?')) return;
+        _stopAuthWatch();
         KangiService.logout();
         state.nfts  = [];
         state.songs = [];
@@ -699,12 +740,18 @@
      NAVIGATION
      ================================================================ */
   function _bindNav() {
+    // Every tab click re-checks authorisation (in parallel, so the tab still
+    // opens instantly; a failed check logs the admin out).
+    const go = (view) => {
+      _switchView(view);
+      _verifyAuthorization();
+    };
     document.querySelectorAll('[data-view]').forEach(btn =>
-      btn.addEventListener('click', () => _switchView(btn.dataset.view))
+      btn.addEventListener('click', () => go(btn.dataset.view))
     );
     /* Quick action tiles on dashboard */
     document.querySelectorAll('[data-nav]').forEach(btn =>
-      btn.addEventListener('click', () => _switchView(btn.dataset.nav))
+      btn.addEventListener('click', () => go(btn.dataset.nav))
     );
   }
 
@@ -3106,12 +3153,11 @@
       if (!state.selectedUser) return;
       const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       await _modalAction(async () => {
-        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
+        const res = await KangiService.setUserShowLogs(playFabId, true);
         if (res && res.success) {
           state.selectedUser.showLogs = true;
-          _modalAlert('success', `✓ In-game console logs ENABLED for ${displayName || email}.`);
+          _modalAlert('success', `✓ In-game console logs ENABLED for ${displayName || email}. Applies in the app within ~30 seconds.`);
           _updateModalButtons(state.selectedUser);
-          await _loadUsers();
         } else {
           _modalAlert('error', (res && res.error) || 'Failed to enable logs.');
         }
@@ -3123,12 +3169,11 @@
       if (!state.selectedUser) return;
       const { email, id: playFabId, display_name: displayName } = state.selectedUser;
       await _modalAction(async () => {
-        const res = await Promise.resolve({ success: false, error: 'ShowLogs not available in Supabase mode.' });
+        const res = await KangiService.setUserShowLogs(playFabId, false);
         if (res && res.success) {
           state.selectedUser.showLogs = false;
-          _modalAlert('success', `✓ In-game console logs HIDDEN for ${displayName || email}.`);
+          _modalAlert('success', `✓ In-game console logs HIDDEN for ${displayName || email}. Applies in the app within ~30 seconds.`);
           _updateModalButtons(state.selectedUser);
-          await _loadUsers();
         } else {
           _modalAlert('error', (res && res.error) || 'Failed to hide logs.');
         }
@@ -3317,6 +3362,7 @@
   async function _showUserDetails(user) {
     if (!el.userDetailsModal) return;
     state.selectedUser = user;
+    user.showLogs = await KangiService.getUserShowLogs(user.id);
 
     el.userDetailsModal.classList.remove('hidden');
     el.userDetailsBody.innerHTML = `
@@ -3653,8 +3699,7 @@
       card.innerHTML = `
         <div class="msg-card-header">
           <div class="msg-card-meta">
-            <span class="msg-from">${_esc(msg.displayName || msg.user_id)}</span>
-            <span class="msg-id">${_esc(msg.user_id || '')}</span>
+            <span class="msg-from" title="${_esc(msg.user_id || '')}">${_esc(msg.displayName || 'Unknown user')}</span>
           </div>
           <div style="display:flex;align-items:center;gap:0.6rem;">
             <span class="chip ${isOpen ? 'chip--red' : 'chip--green'}">${isOpen ? 'Open' : 'Replied'}</span>

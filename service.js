@@ -21,6 +21,22 @@ const KangiService = (function () {
     isLoggedIn:   function() { return !!session.accessToken; }
   };
 
+  /* -- Product id --
+     Every request to Supabase carries an `x-product-id` header so the
+     server/logs can tell the admin dashboard apart from the Unity app
+     ("kangi-unityapp"). It is a header, not a body field, because PostgREST
+     rejects unknown columns in insert/update bodies and RPCs reject unknown
+     arguments. This local `fetch` shadows the global one for every call in
+     this file, so no endpoint can miss it. */
+  const PRODUCT_ID = 'kangi-admin';
+  function fetch(url, opts) {
+    opts = Object.assign({}, opts || {});
+    if (String(url).indexOf(SUPABASE_URL) === 0) {
+      opts.headers = Object.assign({}, opts.headers || {}, { 'x-product-id': PRODUCT_ID });
+    }
+    return window.fetch(url, opts);
+  }
+
   /* -- HTTP helpers -- */
   function _headers(extra) {
     var h = {
@@ -166,6 +182,117 @@ const KangiService = (function () {
   }
 
   function restoreSession() { return null; }
+
+  /* ============================================================
+     AUTHORISATION CHECK
+     Called every 5 s and on every tab click. Returns:
+       'ok'        – session valid and still an admin
+       'expired'   – session gone/invalid (and refresh failed)
+       'not_admin' – admin rights removed or account banned
+       'offline'   – network problem; keep the session, try again later
+     ============================================================ */
+  function _tokenExpiresSoon(token) {
+    try {
+      var payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return !payload.exp || (payload.exp * 1000 - Date.now()) < 60 * 1000;
+    } catch (e) { return true; }
+  }
+
+  async function _refreshSession() {
+    if (!session.refreshToken) return false;
+    try {
+      var res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON },
+        body: JSON.stringify({ refresh_token: session.refreshToken })
+      });
+      if (!res.ok) return false;
+      var data = await res.json();
+      if (!data.access_token) return false;
+      session.accessToken  = data.access_token;
+      session.refreshToken = data.refresh_token || session.refreshToken;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  var _authCheckInFlight = null;
+  function checkAuthorization() {
+    // Overlapping callers (timer + tab click) share one request.
+    if (!_authCheckInFlight) {
+      _authCheckInFlight = _checkAuthorization().finally(function() { _authCheckInFlight = null; });
+    }
+    return _authCheckInFlight;
+  }
+
+  async function _checkAuthorization() {
+    if (!session.accessToken) return 'expired';
+    if (!navigator.onLine) return 'offline';
+
+    if (_tokenExpiresSoon(session.accessToken) && !(await _refreshSession())) return 'expired';
+
+    try {
+      // 1. Is the session itself still valid on the server?
+      var userRes = await fetch(SUPABASE_URL + '/auth/v1/user', { headers: _headers() });
+      if (userRes.status === 401 || userRes.status === 403) {
+        if (!(await _refreshSession())) return 'expired';
+        userRes = await fetch(SUPABASE_URL + '/auth/v1/user', { headers: _headers() });
+        if (!userRes.ok) return 'expired';
+      } else if (!userRes.ok) {
+        return 'offline';
+      }
+
+      // 2. Is this user still an admin (and not banned)?
+      var isAdmin;
+      try {
+        isAdmin = (await _rpc('am_i_admin')) === true;
+      } catch (e) {
+        if (String(e.message).indexOf('am_i_admin') === -1) return 'offline';
+        var rows = await _get('/profiles', {
+          'id': 'eq.' + session.userId, 'select': 'is_admin,is_banned'
+        });
+        var p = (rows && rows[0]) || {};
+        isAdmin = p.is_admin === true && !p.is_banned;
+      }
+      return isAdmin ? 'ok' : 'not_admin';
+    } catch (e) {
+      return 'offline';
+    }
+  }
+
+  /* ============================================================
+     PER-USER IN-GAME LOGS
+     No extra table/column: the choice is sent to the player as a
+     `debug_logs_on` / `debug_logs_off` notification (existing admin-only
+     send_notification RPC). The Unity app applies it silently and keeps
+     it out of the player's notification list. The newest one wins.
+     ============================================================ */
+  async function setUserShowLogs(targetUserId, enabled) {
+    if (!targetUserId) return { success: false, error: 'No user ID provided.' };
+    await _rpc('send_notification', {
+      target_user: targetUserId,
+      notif_title: 'Debug logs',
+      notif_body:  enabled ? 'In-game logs enabled by admin.' : 'In-game logs disabled by admin.',
+      notif_type:  enabled ? 'debug_logs_on' : 'debug_logs_off'
+    });
+    try { localStorage.setItem('kangi_logs_' + targetUserId, enabled ? '1' : '0'); } catch (e) {}
+    return { success: true };
+  }
+
+  async function getUserShowLogs(targetUserId) {
+    if (!targetUserId) return false;
+    try {
+      var rows = await _get('/notifications', {
+        'user_id': 'eq.' + targetUserId,
+        'type':    'in.(debug_logs_on,debug_logs_off)',
+        'order':   'created_at.desc',
+        'limit':   '1',
+        'select':  'type'
+      });
+      if (rows && rows[0]) return rows[0].type === 'debug_logs_on';
+    } catch (e) { /* admins may not be allowed to read other users' notifications */ }
+    // Fall back to what this dashboard last set for the user.
+    try { return localStorage.getItem('kangi_logs_' + targetUserId) === '1'; } catch (e) { return false; }
+  }
 
   function getAdminIdentity() {
     return {
@@ -443,8 +570,40 @@ const KangiService = (function () {
     var rows = await _get('/support_messages', {
       'order':  'created_at.desc',
       'select': '*'
+    }) || [];
+
+    // Current usernames from profiles (the name saved on the message can be
+    // empty or out of date).
+    var names = {};
+    var ids = rows.map(function(r) { return r.user_id; })
+                  .filter(function(id, i, a) { return id && a.indexOf(id) === i; });
+    if (ids.length) {
+      try {
+        var profiles = await _get('/profiles', {
+          'id':     'in.(' + ids.join(',') + ')',
+          'select': 'id,display_name'
+        });
+        (profiles || []).forEach(function(p) { names[p.id] = p.display_name; });
+      } catch (e) {
+        console.warn('[KangiService] Could not load usernames for messages:', e);
+      }
+    }
+
+    // The UI reads camelCase fields.
+    var messages = rows.map(function(r) {
+      return {
+        id:          r.id,
+        user_id:     r.user_id,
+        displayName: names[r.user_id] || r.display_name || 'Unknown user',
+        body:        r.body,
+        status:      r.status,
+        adminReply:  r.admin_reply,
+        repliedAt:   r.replied_at,
+        createdAt:   r.created_at
+      };
     });
-    return { success: true, messages: rows || [] };
+    var openCount = messages.filter(function(m) { return m.status === 'open'; }).length;
+    return { success: true, messages: messages, openCount: openCount };
   }
 
   async function replyToMessage(messageId, reply) {
@@ -736,6 +895,9 @@ const KangiService = (function () {
     logout:                 logout,
     sendAccountRecoveryEmail: sendAccountRecoveryEmail,
     restoreSession:         restoreSession,
+    checkAuthorization:     checkAuthorization,
+    setUserShowLogs:        setUserShowLogs,
+    getUserShowLogs:        getUserShowLogs,
     getAdminIdentity:       getAdminIdentity,
 
     getSongs:               getSongs,
