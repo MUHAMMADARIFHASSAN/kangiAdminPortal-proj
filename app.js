@@ -2873,6 +2873,7 @@
       if (u.is_premium    !== undefined && u.isPremium    === undefined) u.isPremium    = u.is_premium;
       if (u.banned_until  !== undefined && !u.bannedUntil) u.bannedUntil  = u.banned_until;
       if (u.created_at    !== undefined && !u.created)     u.created      = u.created_at;
+      if (u.last_sign_in_at && !u.lastLogin)               u.lastLogin    = u.last_sign_in_at;
     });
 
     // Sort by name alphabetically

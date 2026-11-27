@@ -445,7 +445,38 @@ const KangiService = (function () {
         'select': 'id,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at',
         'order':  'created_at.desc'
       });
-      return { success: true, users: rows2 || [] };
+      rows2 = rows2 || [];
+      // Emails live in Supabase Auth; the admin-user-emails Edge Function
+      // returns them to admins only. Without it the list still loads.
+      var emails = await _getUserEmails();
+      rows2.forEach(function(r) {
+        var e = emails[r.id];
+        if (e) { r.email = e.email; r.last_sign_in_at = e.last_sign_in_at; }
+      });
+      return { success: true, users: rows2 };
+    }
+  }
+
+  /* Calls the admin-only Edge Function. Returns { <userId>: { email,
+     last_sign_in_at } }, or {} if the function is not deployed or fails. */
+  async function _getUserEmails() {
+    try {
+      var res = await fetch(SUPABASE_URL + '/functions/v1/admin-user-emails', {
+        method: 'POST',
+        headers: _headers(),
+        body: '{}'
+      });
+      if (!res.ok) {
+        console.warn('[KangiService] admin-user-emails: HTTP ' + res.status);
+        return {};
+      }
+      var json = await res.json();
+      var map = {};
+      (json.users || []).forEach(function(u) { map[u.id] = u; });
+      return map;
+    } catch (e) {
+      console.warn('[KangiService] admin-user-emails unavailable:', e);
+      return {};
     }
   }
 
@@ -454,7 +485,19 @@ const KangiService = (function () {
       const rows = await _rpc('admin_list_users', { p_email: email });
       return rows && rows[0] ? rows[0] : null;
     } catch (e) {
-      return null;
+      // Fallback: find the id through the Edge Function, then load the profile.
+      var want = String(email || '').trim().toLowerCase();
+      if (!want) return null;
+      var emails = await _getUserEmails();
+      var id = Object.keys(emails).find(function(k) {
+        return String(emails[k].email || '').toLowerCase() === want;
+      });
+      if (!id) return null;
+      var rows2 = await _get('/profiles', {
+        'id': 'eq.' + id,
+        'select': 'id,display_name,avatar_url,is_admin,is_banned,is_premium,banned_until,created_at'
+      }).catch(function() { return []; });
+      return rows2 && rows2[0] ? Object.assign(rows2[0], { email: emails[id].email }) : null;
     }
   }
 
@@ -907,6 +950,7 @@ const KangiService = (function () {
     addSong:                addSong,
 
     getAllUsers:             getAllUsers,
+    getUserByEmail:         getUserByEmail,
     getUserDataFlags:       getUserDataFlags,
     makeAdmin:              makeAdmin,
     revokeAdmin:            revokeAdmin,

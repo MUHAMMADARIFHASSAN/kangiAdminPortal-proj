@@ -36,7 +36,7 @@ ANON_KEY       = (
     "0L2agSv5n9-5iXfcUavgJktXRfL1Hs8InvCW2N2YYbk"
 )
 ADMIN_EMAIL    = "admin@kangi.com"
-ADMIN_PASSWORD = "Admin@12345"
+ADMIN_PASSWORD = "S"
 ADMIN_NAME     = "Kangi Admin"
 DASHBOARD_PORT = 8080
 DASHBOARD_DIR  = os.path.dirname(os.path.abspath(__file__))
