@@ -457,27 +457,49 @@ const KangiService = (function () {
     }
   }
 
-  /* Calls the admin-only Edge Function. Returns { <userId>: { email,
-     last_sign_in_at } }, or {} if the function is not deployed or fails. */
+  /* Returns { <userId>: { email, last_sign_in_at } } from, in order:
+       1. the admin-user-emails Edge Function, if deployed (all users);
+       2. hidden support_messages rows the Unity app writes after login,
+          body "__kangi_email__:<email>" (only the owner and admins can read
+          support_messages, so other players never see them);
+       3. the signed-in admin's own email.
+     Never throws. */
+  var EMAIL_MARKER = '__kangi_email__:';
+
   async function _getUserEmails() {
+    var map = {};
     try {
       var res = await fetch(SUPABASE_URL + '/functions/v1/admin-user-emails', {
         method: 'POST',
         headers: _headers(),
         body: '{}'
       });
-      if (!res.ok) {
-        console.warn('[KangiService] admin-user-emails: HTTP ' + res.status);
-        return {};
+      if (res.ok) {
+        var json = await res.json();
+        (json.users || []).forEach(function(u) { map[u.id] = u; });
+        return map;
       }
-      var json = await res.json();
-      var map = {};
-      (json.users || []).forEach(function(u) { map[u.id] = u; });
-      return map;
+    } catch (e) { /* not deployed — use the fallbacks */ }
+
+    try {
+      var rows = await _get('/support_messages', {
+        'body':   'like.' + EMAIL_MARKER + '*',
+        'order':  'created_at.desc',
+        'select': 'user_id,body'
+      });
+      (rows || []).forEach(function(r) {
+        if (r.user_id && !map[r.user_id]) {   // newest row per user wins
+          map[r.user_id] = { email: r.body.slice(EMAIL_MARKER.length), last_sign_in_at: null };
+        }
+      });
     } catch (e) {
-      console.warn('[KangiService] admin-user-emails unavailable:', e);
-      return {};
+      console.warn('[KangiService] Could not read app-provided emails:', e);
     }
+
+    if (session.userId && session.email && !map[session.userId]) {
+      map[session.userId] = { email: session.email, last_sign_in_at: null };
+    }
+    return map;
   }
 
   async function getUserByEmail(email) {
@@ -614,6 +636,8 @@ const KangiService = (function () {
       'order':  'created_at.desc',
       'select': '*'
     }) || [];
+    // Hidden email rows written by the app (see _getUserEmails) are not messages.
+    rows = rows.filter(function(r) { return String(r.body || '').indexOf(EMAIL_MARKER) !== 0; });
 
     // Current usernames from profiles (the name saved on the message can be
     // empty or out of date).
